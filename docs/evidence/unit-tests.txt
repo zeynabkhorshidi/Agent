@@ -1,0 +1,25 @@
+test_ambiguous_unit_and_product (test_workflow.Workflow.test_ambiguous_unit_and_product) ... ok
+test_concurrent_retry_only_one_order (test_workflow.Workflow.test_concurrent_retry_only_one_order) ... ok
+test_confirmation_required_and_revision (test_workflow.Workflow.test_confirmation_required_and_revision) ... ok
+test_cross_customer_receipt_denied (test_workflow.Workflow.test_cross_customer_receipt_denied) ... ok
+test_csrf_and_admin (test_workflow.Workflow.test_csrf_and_admin) ... ok
+test_duplicate_turn (test_workflow.Workflow.test_duplicate_turn) ... ok
+test_incomplete_profile (test_workflow.Workflow.test_incomplete_profile) ... ok
+test_multi_item_and_edit (test_workflow.Workflow.test_multi_item_and_edit) ... ok
+test_new_customer_order_pdf (test_workflow.Workflow.test_new_customer_order_pdf) ... ok
+test_no_auth_no_private_data (test_workflow.Workflow.test_no_auth_no_private_data) ... ok
+test_normalization (test_workflow.Workflow.test_normalization) ... ok
+test_out_of_stock (test_workflow.Workflow.test_out_of_stock) ... ok
+test_persistence_new_connection (test_workflow.Workflow.test_persistence_new_connection) ... ok
+test_price_change_invalidates_confirmation (test_workflow.Workflow.test_price_change_invalidates_confirmation) ... ok
+test_quote_expiry (test_workflow.Workflow.test_quote_expiry) ... ok
+test_reject_suggestion_and_submit (test_workflow.Workflow.test_reject_suggestion_and_submit) ... ok
+test_restart_requires_confirmation_and_pause (test_workflow.Workflow.test_restart_requires_confirmation_and_pause) ... ok
+test_returning_customer_cart_recovery (test_workflow.Workflow.test_returning_customer_cart_recovery) ... ok
+test_role_permissions (test_workflow.Workflow.test_role_permissions) ... ok
+test_voice_fallback_contract_only (test_workflow.Workflow.test_voice_fallback_contract_only) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.823s
+
+OK

@@ -1,0 +1,13 @@
+services:
+  sellora:
+    build: .
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      SELLORA_ENV: development
+      SELLORA_ADMIN_PASSWORD: ${SELLORA_ADMIN_PASSWORD:?set a strong admin password}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    volumes:
+      - sellora-data:/app/data
+    restart: unless-stopped
+volumes:
+  sellora-data:

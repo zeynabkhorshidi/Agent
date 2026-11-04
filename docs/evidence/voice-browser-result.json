@@ -1,0 +1,21 @@
+{
+  "microphone_recording": "passed (synthetic browser device)",
+  "multipart_http": "passed (controlled STT fixture)",
+  "order_and_pdf": "passed",
+  "fallback": "passed (502 online / 200 offline)",
+  "late_response_cancel": "passed",
+  "typed_text_preserved": "passed",
+  "microphone_denied_text_fallback": "passed",
+  "javascript_errors": [],
+  "mobile_overflow": false,
+  "stop_to_text_ms": [
+    93.05,
+    70.86,
+    70.1,
+    77.1,
+    63.56,
+    67.21,
+    76.05
+  ],
+  "real_company_stt": "not tested; network 403"
+}

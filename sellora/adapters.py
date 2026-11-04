@@ -1,4 +1,4 @@
-"""قراردادهای مستقل؛ هیچ endpoint سرویس شرکت در اینجا حدس زده نمی‌شود."""
+"""قراردادهای توسعه؛ Adapter اجرایی STT با مسیرهای مستند در stt.py و voice_api.py قرار دارد."""
 from typing import Protocol, AsyncIterator
 from dataclasses import dataclass
 import asyncio, time

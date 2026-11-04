@@ -1,0 +1,46 @@
+test_auto_fallback (test_stt.AdapterTests.test_auto_fallback) ... ok
+test_both_fail (test_stt.AdapterTests.test_both_fail) ... ok
+test_circuit_recovers (test_stt.AdapterTests.test_circuit_recovers) ... ok
+test_empty_text_not_fallback (test_stt.AdapterTests.test_empty_text_not_fallback) ... ok
+test_exact_multipart_contract (test_stt.AdapterTests.test_exact_multipart_contract) ... ok
+test_health_not_inference_claim (test_stt.AdapterTests.test_health_not_inference_claim) ... ok
+test_invalid_response_and_redirect (test_stt.AdapterTests.test_invalid_response_and_redirect) ... ok
+test_no_retry_for_invalid_audio (test_stt.AdapterTests.test_no_retry_for_invalid_audio) ... ok
+test_offline_only (test_stt.AdapterTests.test_offline_only) ... ok
+test_online_no_fallback (test_stt.AdapterTests.test_online_no_fallback) ... ok
+test_timeout_falls_back (test_stt.AdapterTests.test_timeout_falls_back) ... ok
+test_unconfigured (test_stt.AdapterTests.test_unconfigured) ... ok
+test_admin_mode_controls_route (test_stt.VoiceAPITests.test_admin_mode_controls_route) ... ok
+test_audio_is_draft_and_duplicate_safe (test_stt.VoiceAPITests.test_audio_is_draft_and_duplicate_safe) ... ok
+test_cancel_while_processing (test_stt.VoiceAPITests.test_cancel_while_processing) ... ok
+test_duplicate_payload_conflict (test_stt.VoiceAPITests.test_duplicate_payload_conflict) ... ok
+test_early_cancel_and_late_replay (test_stt.VoiceAPITests.test_early_cancel_and_late_replay) ... ok
+test_failed_voice_preserves_cart_and_text (test_stt.VoiceAPITests.test_failed_voice_preserves_cart_and_text) ... ok
+test_reject_empty_invalid_oversized (test_stt.VoiceAPITests.test_reject_empty_invalid_oversized) ... ok
+test_request_rate_limit (test_stt.VoiceAPITests.test_request_rate_limit) ... ok
+test_session_and_origin (test_stt.VoiceAPITests.test_session_and_origin) ... ok
+test_ambiguous_unit_and_product (test_workflow.Workflow.test_ambiguous_unit_and_product) ... ok
+test_concurrent_retry_only_one_order (test_workflow.Workflow.test_concurrent_retry_only_one_order) ... ok
+test_confirmation_required_and_revision (test_workflow.Workflow.test_confirmation_required_and_revision) ... ok
+test_cross_customer_receipt_denied (test_workflow.Workflow.test_cross_customer_receipt_denied) ... ok
+test_csrf_and_admin (test_workflow.Workflow.test_csrf_and_admin) ... ok
+test_duplicate_turn (test_workflow.Workflow.test_duplicate_turn) ... ok
+test_incomplete_profile (test_workflow.Workflow.test_incomplete_profile) ... ok
+test_multi_item_and_edit (test_workflow.Workflow.test_multi_item_and_edit) ... ok
+test_new_customer_order_pdf (test_workflow.Workflow.test_new_customer_order_pdf) ... ok
+test_no_auth_no_private_data (test_workflow.Workflow.test_no_auth_no_private_data) ... ok
+test_normalization (test_workflow.Workflow.test_normalization) ... ok
+test_out_of_stock (test_workflow.Workflow.test_out_of_stock) ... ok
+test_persistence_new_connection (test_workflow.Workflow.test_persistence_new_connection) ... ok
+test_price_change_invalidates_confirmation (test_workflow.Workflow.test_price_change_invalidates_confirmation) ... ok
+test_quote_expiry (test_workflow.Workflow.test_quote_expiry) ... ok
+test_reject_suggestion_and_submit (test_workflow.Workflow.test_reject_suggestion_and_submit) ... ok
+test_restart_requires_confirmation_and_pause (test_workflow.Workflow.test_restart_requires_confirmation_and_pause) ... ok
+test_returning_customer_cart_recovery (test_workflow.Workflow.test_returning_customer_cart_recovery) ... ok
+test_role_permissions (test_workflow.Workflow.test_role_permissions) ... ok
+test_voice_fallback_contract_only (test_workflow.Workflow.test_voice_fallback_contract_only) ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 1.291s
+
+OK

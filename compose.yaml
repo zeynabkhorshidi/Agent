@@ -6,6 +6,12 @@ services:
       SELLORA_ENV: development
       SELLORA_ADMIN_PASSWORD: ${SELLORA_ADMIN_PASSWORD:?set a strong admin password}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SELLORA_SALES_PASSWORD: ${SELLORA_SALES_PASSWORD:-}
+      SELLORA_OPERATOR_PASSWORD: ${SELLORA_OPERATOR_PASSWORD:-}
+      STT_BASE_URL: ${STT_BASE_URL:-http://172.20.3.81:30089}
+      STT_ONLINE_TIMEOUT: ${STT_ONLINE_TIMEOUT:-45}
+      STT_OFFLINE_TIMEOUT: ${STT_OFFLINE_TIMEOUT:-120}
+      STT_MAX_UPLOAD_MB: ${STT_MAX_UPLOAD_MB:-25}
     volumes:
       - sellora-data:/app/data
     restart: unless-stopped

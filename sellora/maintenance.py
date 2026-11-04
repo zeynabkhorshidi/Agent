@@ -13,5 +13,6 @@ def main():
             if args.transcript_days<1:p.error('حداقل یک روز لازم است')
             c.execute("DELETE FROM conversations WHERE created < datetime('now', ?)",(f'-{args.transcript_days} days',))
             c.execute('DELETE FROM quotes WHERE expires<?',(int(time.time()),))
+            c.execute('DELETE FROM voice_requests WHERE created<?',(int(time.time())-600,))
             print('رونوشت‌های قدیمی و مرورهای منقضی پاک شدند؛ اطلاعات مشتری و سفارش محفوظ‌اند.')
 if __name__=='__main__':main()

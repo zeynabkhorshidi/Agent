@@ -1,7 +1,11 @@
-import os, json, secrets, time, uuid, hashlib, hmac, io, html, re
+import os, json, secrets, time, uuid, hashlib, hmac, io, html, re, asyncio
+from contextlib import suppress
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File, Form
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -58,7 +62,21 @@ def next_question(customer,s):
 @asynccontextmanager
 async def lifespan(app):
     if PRODUCTION: raise RuntimeError('این توزیع آزمایشی است؛ استقرار عملیاتی نیازمند احراز و منابع تجاری واقعی است. راهنمای استقرار را بخوانید.')
-    db.init();yield
+    db.init()
+    from .stt import HTTPSTT, STTConfig
+    app.state.stt = HTTPSTT(STTConfig.from_env())
+    async def cleanup_voice():
+        while True:
+            with db.connect() as c:
+                c.execute('DELETE FROM voice_requests WHERE created<?', (int(time.time())-600,))
+            await asyncio.sleep(30)
+    cleanup = asyncio.create_task(cleanup_voice())
+    try:
+        yield
+    finally:
+        cleanup.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup
 
 app=FastAPI(title='Sellora',docs_url='/api/docs',lifespan=lifespan)
 @app.middleware('http')
@@ -298,14 +316,14 @@ def health():
         with db.connect() as c:c.execute('SELECT 1').fetchone()
         database='سالم'
     except Exception:database='قطع'
-    return dict(database=database,orders='محلی آزمایشی' if database=='سالم' else 'قطع',stt='نیازمند قرارداد',tts='نیازمند قرارداد',llm='متصل نیست؛ قواعد محلی',catalog='نمونه؛ منبع واقعی در دسترس نبود',authentication='احراز آزمایشی',voice_capabilities=dict(voices=[],streaming=False,full_duplex=False))
+    return dict(database=database,orders='محلی آزمایشی' if database=='سالم' else 'قطع',stt='پیکربندی‌شده؛ سلامت صوت را بررسی کنید' if os.getenv('STT_BASE_URL') else 'نشانی سرویس تنظیم نشده',tts='قرارداد ارائه نشده',llm='متصل نیست؛ قواعد محلی',catalog='نمونه؛ منبع واقعی در دسترس نبود',authentication='احراز آزمایشی',voice_capabilities=dict(voices=[],streaming=False,full_duplex=False,tts=False,file_upload=True))
 
 class Login(BaseModel):
     password:str=Field(max_length=200)
     role:str='admin'
 @app.post('/api/admin/login')
 def admin_login(body:Login,response:Response):
-    password={'admin':ADMIN,'sales':os.getenv('SELLORA_SALES_PASSWORD',''),'operator':os.getenv('SELLORA_OPERATOR_PASSWORD','')}.get(body.role,'')
+    password={'admin':os.getenv('SELLORA_ADMIN_PASSWORD',''),'sales':os.getenv('SELLORA_SALES_PASSWORD',''),'operator':os.getenv('SELLORA_OPERATOR_PASSWORD','')}.get(body.role,'')
     if not password:fail('رمز این نقش روی سرور تنظیم نشده است.',503)
     if not hmac.compare_digest(body.password,password):fail('ورود مجاز نیست.',403)
     token=secrets.token_urlsafe(32);ADMIN_SESSIONS[token]=(time.time()+3600,body.role)
@@ -364,6 +382,9 @@ def admin_receipt(oid:str,request:Request):
         if not r:fail('سفارش وجود ندارد.',404)
         db.audit(c,'admin','receipt.downloaded',{'order_id':oid})
         return Response(pdf(dict(r)),media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="{oid}.pdf"'})
+
+from .voice_api import register_voice
+register_voice(app, sid, load)
 
 @app.get('/')
 def index():return FileResponse(db.ROOT/'web/index.html')

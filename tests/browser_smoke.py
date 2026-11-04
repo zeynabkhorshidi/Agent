@@ -8,7 +8,7 @@ with sync_playwright() as p:
     page=browser.new_page(viewport={'width':1440,'height':1100},device_scale_factor=1)
     errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(os.getenv('BASE_URL','http://127.0.0.1:8000'));page.wait_for_selector('.product');page.screenshot(path=str(out/'desktop.png'),full_page=True)
-    page.click('#voiceStart');page.wait_for_selector('#voiceError');assert 'متصل نیست' in page.locator('#voiceError').inner_text()
+    page.click('#textStart')
     measurements=[]
     for text in ['09'+str(uuid.uuid4().int)[:9],'123456','فروشگاه آزمایشی','تهران','خیابان آزمایشی، پلاک ۱۲','بله','پرتقال دو کارتن و انبه سه کارتن','پیشنهاد نمی‌خواهم']:
         before=page.locator('.bubble').count();start=time.perf_counter();page.fill('#input',text);page.click('.send');page.wait_for_function('(n)=>document.querySelectorAll(".bubble").length>n',arg=before if before>1 else 0);page.wait_for_function('()=>!document.querySelector("#input").disabled');measurements.append(round((time.perf_counter()-start)*1000,2))
@@ -21,5 +21,5 @@ with sync_playwright() as p:
     mobile=browser.new_page(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
     mobile.goto(os.getenv('BASE_URL','http://127.0.0.1:8000'));mobile.wait_for_selector('.product');assert mobile.evaluate('document.documentElement.scrollWidth<=innerWidth');mobile.screenshot(path=str(out/'mobile.png'),full_page=True)
     assert not errors,errors
-    print(json.dumps({'browser_errors':errors,'desktop':'passed','mobile_overflow':'none','text_turn_roundtrip_ms':measurements,'submit_to_success_ms':submit_ms,'audio':'not connected'},ensure_ascii=False))
+    print(json.dumps({'browser_errors':errors,'desktop':'passed','mobile_overflow':'none','text_turn_roundtrip_ms':measurements,'submit_to_success_ms':submit_ms,'audio':'tested separately in browser_voice.py'},ensure_ascii=False))
     browser.close()

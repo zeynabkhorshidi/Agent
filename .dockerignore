@@ -5,3 +5,5 @@ data
 __pycache__
 tests
 artifacts
+**/__pycache__
+**/*.pyc

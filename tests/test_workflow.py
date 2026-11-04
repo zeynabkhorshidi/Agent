@@ -14,9 +14,15 @@ TIMINGS=[]
 class Workflow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.original_path=db.PATH
+        cls.tempdb=tempfile.TemporaryDirectory()
+        db.PATH=str(Path(cls.tempdb.name)/'workflow.db')
         cls.ctx=TestClient(app);cls.ctx.__enter__()
     @classmethod
-    def tearDownClass(cls):cls.ctx.__exit__(None,None,None)
+    def tearDownClass(cls):
+        cls.ctx.__exit__(None,None,None)
+        db.PATH=cls.original_path
+        cls.tempdb.cleanup()
     def client(self):
         c=TestClient(app);self.assertEqual(c.get('/api/session').status_code,200);return c
     def turn(self,c,text,tid=None):

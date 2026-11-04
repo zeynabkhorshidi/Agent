@@ -2,8 +2,15 @@ import os, sqlite3, json, pathlib
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 PATH=os.getenv('SELLORA_DB',str(ROOT/'data/sellora.db'))
 
+class Connection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
 def connect():
-    c=sqlite3.connect(PATH,timeout=15,isolation_level=None)
+    c=sqlite3.connect(PATH,timeout=15,isolation_level=None,factory=Connection)
     c.row_factory=sqlite3.Row
     c.execute('PRAGMA foreign_keys=ON')
     c.execute('PRAGMA journal_mode=WAL')
@@ -12,7 +19,8 @@ def connect():
 def init():
     pathlib.Path(PATH).parent.mkdir(parents=True,exist_ok=True)
     with connect() as c:
-        c.executescript((ROOT/'migrations/001_initial.sql').read_text())
+        for migration in sorted((ROOT/'migrations').glob('*.sql')):
+            c.executescript(migration.read_text())
         if not c.execute('SELECT 1 FROM products LIMIT 1').fetchone():
             products=[('DEMO-OR-1','نوشیدنی پرتقال','پرتقال','۱ لیتر','#f8a83a',180000,24),('DEMO-MA-1','نوشیدنی انبه','انبه','۱ لیتر','#ffc24d',210000,18),('DEMO-AP-1','نوشیدنی سیب','سیب','۱ لیتر','#87ad72',175000,30),('DEMO-WA-05','آب آشامیدنی','ساده','۵۰۰ میلی‌لیتر','#6dbde1',96000,40)]
             c.execute('BEGIN IMMEDIATE')

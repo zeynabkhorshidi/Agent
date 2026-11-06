@@ -1,3 +1,4 @@
+from tests.fixtures import seed_test_products
 import os,tempfile,unittest,uuid,json,time,concurrent.futures,asyncio
 from pathlib import Path
 os.environ['SELLORA_DB']=str(Path(tempfile.mkdtemp())/'test.db')
@@ -17,7 +18,7 @@ class Workflow(unittest.TestCase):
         cls.original_path=db.PATH
         cls.tempdb=tempfile.TemporaryDirectory()
         db.PATH=str(Path(cls.tempdb.name)/'workflow.db')
-        cls.ctx=TestClient(app);cls.ctx.__enter__()
+        cls.ctx=TestClient(app);cls.ctx.__enter__();seed_test_products()
     @classmethod
     def tearDownClass(cls):
         cls.ctx.__exit__(None,None,None)

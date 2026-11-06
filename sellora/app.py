@@ -48,17 +48,18 @@ def save_cart(c,sid,items):
 def view(c,sid):
     r,s=load(c,sid); rev,items=cart(c,sid)
     customer=dict(c.execute('SELECT * FROM customers WHERE id=?',(r['customer_id'],)).fetchone()) if r['customer_id'] else None
-    ps=db.products(c); by={p['sku']:p for p in ps}
+    ps=[p for p in db.products(c) if p.get('catalog_verified')]; by={p['sku']:p for p in ps}
     lines=[dict(by[k],quantity=n,total=by[k]['price']*n) for k,n in items.items() if k in by]
     history=[dict(x) for x in c.execute('SELECT role,text FROM conversations WHERE session_id=? ORDER BY id DESC LIMIT 60',(sid,)).fetchall()][::-1]
-    return dict(customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,demo=True)
+    hero=next((p.get('image_url') for p in ps if p.get('image_url') and any(b in normalize(p.get('brand','')+' '+p['name']).lower().replace(' ','') for b in ('سنایچ','sunich'))),None)
+    return dict(hero_image=hero,customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,demo=True)
 
 def next_question(customer,s):
     if not customer:return 'شماره موبایلتان را وارد کنید. احراز این نسخه آزمایشی است.'
     for key,label in [('name','نام و نام خانوادگی'),('city','شهر تحویل'),('address','آدرس کامل تحویل')]:
         if not customer[key]:s['stage']=key;return f'لطفاً {label} را بفرمایید.'
     if not s.get('address_confirmed'):s['stage']='address_confirm';return f"مقصد را تأیید می‌کنید؟ {customer['city']}، {customer['address']} (بله / تغییر آدرس)"
-    s['stage']='shopping';return 'چه محصولی و چند کارتن نیاز دارید؟ واحد فروش نمونه‌ها کارتن دوازده‌تایی است.'
+    s['stage']='shopping';return 'چه محصولی می‌خواهید؟'
 
 @asynccontextmanager
 async def lifespan(app):
@@ -69,6 +70,9 @@ async def lifespan(app):
     from .intelligence import SalesModel, SpeechOutput
     app.state.sales_model=SalesModel()
     app.state.speech_output=SpeechOutput()
+    from .catalog import CatalogSync
+    app.state.catalog_sync=CatalogSync()
+    if os.getenv('CATALOG_AUTO_SYNC','true').lower()=='true':app.state.catalog_sync.start()
     async def cleanup_voice():
         while True:
             with db.connect() as c:
@@ -78,6 +82,9 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if app.state.catalog_sync.task and not app.state.catalog_sync.task.done():
+            app.state.catalog_sync.task.cancel()
+            with suppress(asyncio.CancelledError):await app.state.catalog_sync.task
         cleanup.cancel()
         with suppress(asyncio.CancelledError):
             await cleanup
@@ -138,7 +145,7 @@ def repeated_turn(c,value,body,reply):
 async def turn(body:Turn,request:Request):
     start=time.perf_counter();value=sid(request);text=normalize(body.text)
     with db.connect() as c:
-        _,initial=load(c,value);initial_rev,initial_items=cart(c,value);products=db.products(c)
+        _,initial=load(c,value);initial_rev,initial_items=cart(c,value);products=[p for p in db.products(c) if p.get('catalog_verified')]
         prior=c.execute("SELECT text FROM conversations WHERE session_id=? AND turn_id=? AND role='assistant'",(value,body.turn_id)).fetchone()
         if prior:return repeated_turn(c,value,body,prior['text'])
     # تماس مدل خارج از تراکنش؛ تأیید نهایی هرگز از خروجی مدل استنباط نمی‌شود.
@@ -184,11 +191,11 @@ def apply_plan(c,value,plan):
     auth(c,value);_,items=cart(c,value);by={p['sku']:p for p in db.products(c)};summary=[]
     for change in plan.items:
         p=by.get(change.sku)
-        if not p:fail('کالای پیشنهادی مدل در کاتالوگ نیست.')
+        if not p or not p.get('catalog_verified'):fail('کالای پیشنهادی مدل در کاتالوگ نیست.')
         if change.action=='remove':items.pop(change.sku,None);summary.append(p['name']+' از سبد حذف شد');continue
         if change.quantity is None:return 'برای '+p['name']+' چند کارتن نیاز دارید؟'
         if change.unit!='کارتن' and change.sku not in items:return 'منظورتان '+str(change.quantity)+' کارتن '+p['name']+' است؟ نام، تعداد و واحد را تأیید کنید.'
-        if not p['active'] or change.quantity<p['minimum'] or change.quantity>p['stock']:return 'این تعداد از '+p['name']+' موجود نیست. لطفاً تعداد دیگری انتخاب کنید.'
+        if not p['active'] or not p.get('commercial_ready') or change.quantity<p['minimum'] or change.quantity>p['stock']:return 'این تعداد از '+p['name']+' موجود نیست. لطفاً تعداد دیگری انتخاب کنید.'
         items[change.sku]=change.quantity;summary.append(p['name']+'، '+str(change.quantity)+' کارتن')
     save_cart(c,value,items)
     return 'سبد شما به‌روز شد: '+'؛ '.join(summary)+'. مورد دیگری نیاز دارید یا سفارش را مرور کنیم؟'
@@ -267,7 +274,7 @@ def handle(c,value,s,text):
     return shopping(c,value,s,text)
 
 def shopping(c,value,s,text):
-    rev,items=cart(c,value);ps=db.products(c)
+    rev,items=cart(c,value);ps=[p for p in db.products(c) if p.get('catalog_verified')]
     if text in ('نه','نمی‌خوام','پیشنهاد نمی‌خواهم'):s['rejected']=True;return 'پیشنهاد دیگری مطرح نمی‌کنم. می‌توانید سفارش را مرور کنید.'
     if text in ('حذفش کن','اولی رو حذف کن'):
         sku=s.get('last_sku') if text=='حذفش کن' else next(iter(items),None)
@@ -283,15 +290,13 @@ def shopping(c,value,s,text):
         n=quantity(part)
         if n is None:questions.append('چند کارتن '+p['name']+' نیاز دارید؟ لطفاً نام و تعداد را با هم بگویید.');continue
         if 'کارتن' not in part and sku not in items:questions.append('منظورتان '+str(n)+' کارتن '+p['name']+' است؟ برای تأیید نام، تعداد و «کارتن» را بگویید.');continue
-        if n<p['minimum'] or n>p['stock'] or not p['active']:questions.append(p['name']+' با این تعداد موجود نیست؛ موجودی آزمایشی '+str(p['stock'])+' کارتن است.');continue
+        if not p['active'] or not p.get('commercial_ready'):
+            questions.append(p['name']+' برای ثبت سفارش نیاز به استعلام فروش دارد.');continue
+        if n<p['minimum'] or n>p['stock']:questions.append(p['name']+' با این تعداد موجود نیست؛ موجودی '+str(p['stock'])+' کارتن است.');continue
         items[sku]=n;changes.append(p['name']+'، '+str(n)+' کارتن')
     if changes:save_cart(c,value,items)
     reply='؛ '.join(changes+questions)
     if not reply:reply='نام یا تعداد روشن نیست. نام محصول و تعداد کارتن را بگویید یا از کارت محصول انتخاب کنید.'
-    if changes and not questions and not s.get('suggested') and not s.get('rejected'):
-        s['suggested']=True
-        settings=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
-        if settings['suggestion_limit']>0:reply+='؛ اگر برای سبد نوشیدنی، آب هم نیاز دارید می‌توانید از کاتالوگ انتخاب کنید. این پیشنهاد قاعده‌ای آزمایشی است.'
     return reply
 
 class CartChange(BaseModel):
@@ -306,8 +311,8 @@ def change(body:CartChange,request:Request):
         rev,items=cart(c,value)
         if rev!=body.revision:fail('سبد در جای دیگری تغییر کرده است. صفحه را تازه کنید.',409)
         p=next((p for p in db.products(c) if p['sku']==body.sku),None)
-        if not p:fail('محصول پیدا نشد.',404)
-        if body.quantity and (not p['active'] or body.quantity<p['minimum'] or body.quantity>p['stock']):fail('تعداد در محدوده موجودی و حداقل فروش نیست.')
+        if not p or not p.get('catalog_verified'):fail('محصول در کاتالوگ شرکت ثبت نشده است.',404)
+        if body.quantity and (not p['active'] or not p.get('commercial_ready') or body.quantity<p['minimum'] or body.quantity>p['stock']):fail('تعداد در محدوده موجودی و حداقل فروش نیست.')
         if body.quantity:items[body.sku]=body.quantity
         else:items.pop(body.sku,None)
         save_cart(c,value,items);c.commit();return view(c,value)
@@ -316,17 +321,17 @@ def create_quote(c,value):
     customer=auth(c,value);_,s=load(c,value)
     if not all(customer[k] for k in ('name','city','address')) or not s.get('address_confirmed'):fail('مشخصات و مقصد را در گفت‌وگو تکمیل و تأیید کنید.')
     v=view(c,value)
-    if not v['cart']['items']:fail('سبد خالی است.')
+    if not v['cart']['items']:fail('هنوز کالایی به سبد اضافه نکرده‌اید.')
     for p in v['cart']['items']:
         if p['quantity']>p['stock'] or not p['active']:fail('موجودی تغییر کرده است. سبد را اصلاح کنید.',409)
     settings=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
-    snapshot=dict(customer=customer,items=v['cart']['items'],total=v['cart']['total'],currency='تومان',discount=0,tax=0,shipping=0,commercial_note='داده و قیمت آزمایشی؛ مالیات و ارسال محاسبه نشده، پرداخت و زمان تحویل تعیین نشده است.',expert_required=settings['expert_required'])
+    snapshot=dict(customer=customer,items=v['cart']['items'],total=v['cart']['total'],currency='تومان',discount=0,tax=0,shipping=0,commercial_note='هزینه ارسال، مالیات و شرایط پرداخت هنگام تأیید فروش اعلام می‌شود.',expert_required=settings['expert_required'])
     qid=uid();c.execute('INSERT INTO quotes VALUES(?,?,?,?,?)',(qid,value,v['cart']['revision'],D(snapshot),int(time.time())+300))
     return dict(speech_summary=quote_speech(snapshot),id=qid,revision=v['cart']['revision'],snapshot=snapshot,expires_in=300)
 
 def quote_speech(snapshot):
     lines='؛ '.join(f"{x['name']}، {x['size']}، {x['quantity']} کارتن، جمع {x['total']:,} تومان" for x in snapshot['items'])
-    return f"سفارش برای {snapshot['customer']['name']}، مقصد {snapshot['customer']['city']}، {snapshot['customer']['address']}. {lines}. جمع اقلام {snapshot['total']:,} تومان. قیمت‌ها آزمایشی‌اند؛ پرداخت، ارسال و مالیات تعیین نشده. اگر همه موارد درست است بگویید سفارش را تأیید می‌کنم."
+    return f"سفارش برای {snapshot['customer']['name']}، مقصد {snapshot['customer']['city']}، {snapshot['customer']['address']}. {lines}. جمع اقلام {snapshot['total']:,} تومان. هزینه ارسال، مالیات و شرایط پرداخت هنوز نهایی نشده. اگر همه موارد درست است بگویید سفارش را تأیید می‌کنم."
 
 @app.post('/api/quote')
 def quote(request:Request):
@@ -342,7 +347,7 @@ class Submit(BaseModel):
     request_key:str=Field(min_length=16,max_length=100)
     confirmed:bool
 def registered_speech(oid):
-    return 'سفارش آزمایشی شما با شماره '+oid+' ثبت شد. رسید آماده دریافت است؛ پرداخت و زمان تحویل هنوز تعیین نشده‌اند.'
+    return 'درخواست سفارش شما با شماره '+oid+' ثبت شد. رسید آماده دریافت است؛ پرداخت و زمان تحویل هنوز تعیین نشده‌اند.'
 
 def submit_order(c,value,body):
     customer=auth(c,value)
@@ -362,7 +367,7 @@ def submit_order(c,value,body):
     current=auth(c,value)
     if current!=snap['customer']:fail('مشخصات تغییر کرده؛ دوباره مرور کنید.',409)
     oid='SL-'+secrets.token_hex(6).upper();now=datetime.now(timezone.utc).isoformat()
-    status='در انتظار تأیید کارشناس' if snap['expert_required'] else 'ثبت آزمایشی'
+    status='در انتظار تأیید کارشناس' if snap['expert_required'] else 'درخواست ثبت‌شده'
     c.execute('INSERT INTO orders VALUES(?,?,?,?,?,?,?)',(oid,customer['id'],body.request_key,body.quote_id,D(snap),now,status))
     for i in snap['items']:c.execute('UPDATE inventory SET quantity=quantity-?,version=version+1 WHERE sku=?',(i['quantity'],i['sku']))
     save_cart(c,value,{})
@@ -434,7 +439,7 @@ def dashboard(request:Request):
                 r['snapshot']['customer']={'name':'اطلاعات محدودشده','city':'—'}
                 r['customer_id']='محدود'
         audits=[dict(r) for r in c.execute('SELECT kind,data,created FROM audit_events ORDER BY id DESC LIMIT 100')]
-        return dict(role=role,orders=rows,settings=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),products=db.products(c),audit=audits if role=='admin' else [],callbacks=[dict(r) for r in c.execute('SELECT * FROM callbacks')] if role in ('admin','sales') else [],metrics=dict(order_count=len(rows),average_order=(sum(r['snapshot']['total'] for r in rows)//len(rows) if rows else None),completion_rate=None,satisfaction=None))
+        return dict(role=role,orders=rows,settings=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),products=[p for p in db.products(c) if p.get('catalog_verified')],audit=audits if role=='admin' else [],callbacks=[dict(r) for r in c.execute('SELECT * FROM callbacks')] if role in ('admin','sales') else [],metrics=dict(order_count=len(rows),average_order=(sum(r['snapshot']['total'] for r in rows)//len(rows) if rows else None),completion_rate=None,satisfaction=None))
 class Settings(BaseModel):
     mode:str
     style:str=Field(max_length=80)
@@ -452,6 +457,9 @@ class Commercial(BaseModel):
     price:int=Field(ge=0,le=1000000000)
     stock:int=Field(ge=0,le=1000000)
     active:bool|None=None
+    per_carton:int|None=Field(default=None,ge=1,le=1000)
+    minimum:int|None=Field(default=None,ge=1,le=10000)
+    unit:Literal['کارتن']|None=None
 @app.post('/api/admin/commercial')
 def commercial(body:Commercial,request:Request):
     admin(request)
@@ -460,7 +468,12 @@ def commercial(body:Commercial,request:Request):
         if not c.execute('SELECT 1 FROM products WHERE sku=?',(body.sku,)).fetchone():fail('کالا وجود ندارد.',404)
         c.execute('UPDATE prices SET amount=?,version=version+1 WHERE sku=?',(body.price,body.sku))
         c.execute('UPDATE inventory SET quantity=?,version=version+1 WHERE sku=?',(body.stock,body.sku))
+        product=json.loads(c.execute('SELECT data FROM products WHERE sku=?',(body.sku,)).fetchone()[0])
+        for key in ('per_carton','minimum','unit'):
+            if getattr(body,key) is not None:product[key]=getattr(body,key)
+        c.execute('UPDATE products SET data=? WHERE sku=?',(D(product),body.sku))
         if body.active is not None:
+            if body.active and not(product.get('catalog_verified') and product.get('per_carton') and product.get('minimum') and product.get('unit')):fail('بسته‌بندی و واحد فروش کالای کاتالوگ باید کامل شوند.')
             if body.active and body.price<=0:fail('فعال‌سازی کالا به قیمت مثبت نیاز دارد.')
             c.execute('UPDATE products SET active=? WHERE sku=?',(int(body.active),body.sku))
         db.audit(c,'admin','commercial.changed',body.model_dump());c.commit()
@@ -534,6 +547,21 @@ def catalog_import(body:CatalogBatch,request:Request):
             c.execute('INSERT OR IGNORE INTO inventory VALUES(?,0,1)',(p['sku'],))
         db.audit(c,'admin','catalog.imported',{'count':len(items)});c.commit()
     return {'count':len(items),'active':False}
+
+@app.post('/api/admin/catalog/sync')
+async def catalog_sync(request:Request):
+    admin(request)
+    return request.app.state.catalog_sync.start()
+
+@app.get('/api/catalog/status')
+def catalog_status(request:Request):
+    with db.connect() as c:load(c,sid(request))
+    return request.app.state.catalog_sync.state
+
+@app.get('/api/admin/voice/diagnostics')
+async def voice_diagnostics(request:Request):
+    admin(request)
+    return await request.app.state.stt.diagnostics()
 
 @app.get('/api/admin/catalog/preview')
 async def catalog_preview(request:Request):

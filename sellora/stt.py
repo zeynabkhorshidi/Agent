@@ -36,7 +36,7 @@ class STTConfig:
 
     @classmethod
     def from_env(cls):
-        return cls(os.getenv('STT_BASE_URL', '').rstrip('/'),
+        return cls(os.getenv('STT_BASE_URL', '').strip().rstrip('/'),
                    float(os.getenv('STT_ONLINE_TIMEOUT', '45')),
                    float(os.getenv('STT_OFFLINE_TIMEOUT', '120')),
                    int(os.getenv('STT_MAX_UPLOAD_MB', '25')) * 1024 * 1024)
@@ -71,7 +71,8 @@ class HTTPSTT:
     async def health(self):
         if not self.config.base_url:
             return {'configured': False, 'reachable': False, 'message': 'نشانی سرویس گفتار تنظیم نشده است.'}
-        self.config.validate()
+        try:self.config.validate()
+        except STTError as e:return {'configured':True,'reachable':False,'message':e.message,'code':e.code}
         try:
             async with self.client(3) as client:
                 r = await client.get(self.config.base_url + '/health')
@@ -88,6 +89,38 @@ class HTTPSTT:
             return {'configured': True, 'reachable': False,
                     'message': 'از سرور فروش به سرویس گفتار دسترسی نداریم؛ شبکه شرکت و نشانی سرویس بررسی شود.'}
 
+    async def diagnostics(self):
+        report={'configured':bool(self.config.base_url),'checks':{},'message':'تنظیمات صدا بررسی شد.'}
+        try:self.config.validate()
+        except STTError as e:return dict(report,code=e.code,message=e.message)
+        for name,path in [('health','/health'),('contract','/openapi.json')]:
+            try:
+                async with self.client(5) as client:r=await client.get(self.config.base_url+path)
+                result={'http_status':r.status_code,'content_type':r.headers.get('content-type','')[:80]}
+                if r.status_code==200:
+                    try:body=r.json()
+                    except ValueError:body=None
+                    if name=='health':
+                        result['valid']=isinstance(body,dict) and body.get('status')=='ok'
+                        if isinstance(body,dict):
+                            for key in ('offline_model_files_present','offline_model_loaded'):result[key]=body.get(key) is True
+                    else:
+                        paths=body.get('paths',{}) if isinstance(body,dict) else {}
+                        result['online_route']='/api/v1/stt/online' in paths
+                        result['offline_route']='/api/v1/stt/offline' in paths
+                        result['valid']=result['online_route'] and result['offline_route']
+                report['checks'][name]=result
+            except httpx.TimeoutException:report['checks'][name]={'error':'timeout'}
+            except httpx.ConnectError as e:report['checks'][name]={'error':'tls_verification' if 'CERTIFICATE_VERIFY_FAILED' in str(e) else 'connection'}
+            except httpx.HTTPError:report['checks'][name]={'error':'network'}
+        checks=report['checks']
+        if any(c.get('http_status') in (401,403) for c in checks.values()):report.update(code='access_denied',message='دسترسی به سرویس گفتار رد شده؛ شبکه یا مجوز سرویس باید بررسی شود.')
+        elif any(c.get('error')=='tls_verification' for c in checks.values()):report.update(code='tls_verification',message='گواهی اتصال به سرویس گفتار در این سیستم مورد اعتماد نیست.')
+        elif any(c.get('error') for c in checks.values()):report.update(code='network',message='ارتباط با سرویس گفتار برقرار نیست؛ مسیر شبکه یا نشانی سرویس بررسی شود.')
+        elif not checks.get('contract',{}).get('valid'):report.update(code='contract_mismatch',message='نشانی پاسخ می‌دهد اما قرارداد سرویس گفتار مورد انتظار در آن دیده نشد.')
+        else:report.update(code='reachable',message='ارتباط و مسیرهای سرویس درست‌اند؛ تشخیص واقعی باید با یک فایل صوتی بررسی شود.')
+        return report
+
     def status(self):
         return {'configured': bool(self.config.base_url), 'streaming': False, 'full_duplex': False,
                 'tts': False, 'voices': [], 'upload_field': 'file',
@@ -97,6 +130,12 @@ class HTTPSTT:
                             'last_success_utc': self.last_success['offline'], 'last_error': self.last_error['offline']}}
 
     async def transcribe(self, audio, filename, content_type, mode):
+        self.config.validate()
+        deadline=(self.config.online_timeout+self.config.offline_timeout if mode=='auto' else self.config.offline_timeout if mode=='offline' else self.config.online_timeout)+5
+        try:return await asyncio.wait_for(self._dispatch(audio,filename,content_type,mode),deadline)
+        except TimeoutError:raise STTError('timeout','دریافت متن طول کشید؛ دوباره ضبط کنید یا بنویسید.',504,True) from None
+
+    async def _dispatch(self, audio, filename, content_type, mode):
         self.config.validate()
         if mode not in ('auto', 'online', 'offline'):
             raise STTError('invalid_mode', 'حالت صوت معتبر نیست.', 400)

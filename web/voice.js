@@ -1,15 +1,16 @@
+import {speechWav} from './audio.js';
 /* دریافت گفتار فقط از STT شرکت؛ هیچ Web Speech API یا TTS جایگزین به کار نمی‌رود. */
 export class VoiceController {
   constructor({onDraft,onStatus,onError,canStart,getQuote,autoStop}) {
     Object.assign(this,{onDraft,onStatus,onError,canStart,getQuote,autoStop});
     this.generation=0;this.recorder=null;this.stream=null;this.controller=null;this.turnId=null;
-    this.state='idle';this.chunks=[];this.vadFrame=null;this.audioContext=null;this.timer=null;this.limitTimer=null;this.limit=50;this.maxBytes=25*1024*1024;
+    this.state='idle';this.chunks=[];this.vadFrame=null;this.audioContext=null;this.timer=null;this.limitTimer=null;this.limit=50;this.requestTimeout=180000;this.maxBytes=25*1024*1024;
   }
   setState(state,label){this.state=state;this.onStatus(state,label);}
   async status(){
     const r=await fetch('/api/voice/status');
     const b=await r.json();if(!r.ok)throw Error(b.detail||'وضعیت صوت دریافت نشد.');
-    this.maxBytes=b.max_upload_bytes;this.limit=b.recording_limit_seconds;
+    this.maxBytes=b.max_upload_bytes;this.requestTimeout=(b.request_timeout_seconds||180)*1000;this.limit=b.recording_limit_seconds;
     return b;
   }
   stopTracks(){cancelAnimationFrame(this.vadFrame);this.vadFrame=null;this.audioContext?.close().catch(()=>{});this.audioContext=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;clearInterval(this.timer);clearTimeout(this.limitTimer);}
@@ -23,7 +24,7 @@ export class VoiceController {
       const settings=await this.status();if(generation!==this.generation)return;
       if(!settings.configured)throw Error('نشانی سرویس گفتار روی سرور تنظیم نشده است؛ راهنمای اتصال را بررسی کنید.');
       // بررسی قابلیت شبکه جدا از مجوز کاربر است؛ فایل صوت تا اقدام او تولید نمی‌شود.
-      const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(deviceId?{deviceId:{exact:deviceId}}:{})}});
+      const stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(deviceId?{deviceId:{exact:deviceId}}:{})}});
       if(generation!==this.generation){stream.getTracks().forEach(t=>t.stop());return;}
       this.stream=stream;
       const mime=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));
@@ -31,10 +32,13 @@ export class VoiceController {
       let size=0;
       recorder.ondataavailable=e=>{if(generation===this.generation&&e.data.size){size+=e.data.size;if(size>this.maxBytes){this.cancel();this.onError('حجم ضبط بیش از حد مجاز شد؛ کوتاه‌تر صحبت کنید.');return;}this.chunks.push(e.data);}};
       recorder.onerror=()=>{if(generation===this.generation){this.cancel();this.onError('ضبط صدا قطع شد؛ دوباره تلاش کنید یا متنی ادامه دهید.');}};
-      recorder.onstop=()=>{
+      recorder.onstop=async()=>{
         if(generation!==this.generation)return;this.stopTracks();
         const blob=new Blob(this.chunks,{type:recorder.mimeType||'audio/webm'});this.chunks=[];this.recorder=null;
         if(!blob.size){this.setState('idle','آماده');this.onError('صدایی ضبط نشد.');return;}
+        this.setState('processing','در حال آماده‌کردن صدا…');
+        const wav=await speechWav(blob);if(generation!==this.generation)return;
+        if(wav){await this.upload(wav,'voice.wav',generation);return;}
         const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';
         this.upload(blob,'voice.'+ext,generation);
       };
@@ -56,24 +60,27 @@ export class VoiceController {
     this.setState('processing','در حال تبدیل گفتار به متن');
     this.turnId=crypto.randomUUID();const turnId=this.turnId;
     this.controller=new AbortController();const form=new FormData();form.append('file',blob,filename);form.append('turn_id',turnId);const quoteId=this.getQuote?.();if(quoteId)form.append('quote_id',quoteId);
+    const controller=this.controller;let timedOut=false;const deadline=setTimeout(()=>{timedOut=true;controller.abort();},this.requestTimeout);
     try{
-      const r=await fetch('/api/voice/transcribe',{method:'POST',body:form,signal:this.controller.signal});const b=await r.json();
+      const r=await fetch('/api/voice/transcribe',{method:'POST',body:form,signal:this.controller.signal});
+      let b;try{b=await r.json();}catch{throw Error('تبدیل صدا انجام نشد. دوباره امتحان کنید.');}
       if(generation!==this.generation)return;
       if(!r.ok)throw Error(typeof b.detail==='string'?b.detail:'تبدیل گفتار انجام نشد. فایل دیگری امتحان کنید یا متنی ادامه دهید.');
       if(b.turn_id!==turnId)return;
       this.controller=null;this.turnId=null;this.onDraft(b);if(generation===this.generation)this.setState('draft','متن آماده بررسی شماست');
-    }catch(e){if(generation!==this.generation||e.name==='AbortError')return;this.setState('idle','ورود متنی آماده');this.onError(e instanceof TypeError?'ارتباط با سرور قطع شد؛ سبد محفوظ است. دوباره تلاش کنید یا متنی ادامه دهید.':e.message);}
-    finally{if(generation===this.generation){this.controller=null;this.turnId=null;}}
+    }catch(e){if(generation!==this.generation)return;if(e.name==='AbortError'&&!timedOut)return;if(timedOut){fetch('/api/voice/cancel/'+encodeURIComponent(turnId),{method:'POST'}).catch(()=>{});this.setState('idle','آماده');this.onError('دریافت متن طول کشید. دوباره امتحان کنید یا پیامتان را بنویسید.');return;}this.setState('idle','ورود متنی آماده');this.onError(e instanceof TypeError?'ارتباط با سرور قطع شد؛ سبد محفوظ است. دوباره تلاش کنید یا متنی ادامه دهید.':e.message);}
+    finally{clearTimeout(deadline);if(generation===this.generation){this.controller=null;this.turnId=null;}}
   }
   watchSilence(stream,generation){
     const Context=window.AudioContext||window.webkitAudioContext;if(!Context)return;
-    this.audioContext=new Context();const source=this.audioContext.createMediaStreamSource(stream);const analyser=this.audioContext.createAnalyser();analyser.fftSize=1024;source.connect(analyser);
+    this.audioContext=new Context();if(this.audioContext.state==='suspended')this.audioContext.resume().catch(()=>{});const source=this.audioContext.createMediaStreamSource(stream);const analyser=this.audioContext.createAnalyser();analyser.fftSize=1024;source.connect(analyser);
     const data=new Uint8Array(analyser.fftSize);let heard=false,lastLoud=performance.now(),start=performance.now();
     const tick=()=>{if(generation!==this.generation||this.recorder?.state!=='recording')return;
       analyser.getByteTimeDomainData(data);let sum=0;for(const v of data)sum+=((v-128)/128)**2;const rms=Math.sqrt(sum/data.length),now=performance.now();
-      if(rms>.025){heard=true;lastLoud=now;}
-      if(heard&&now-lastLoud>1400&&now-start>1800){this.stop();return;}
-      if(!heard&&now-start>10000){this.cancel();this.onError('صدایی شنیده نشد. هر وقت آماده بودید دوباره شروع کنید یا بنویسید.');return;}
+      if(this.audioContext?.state!=='running'){this.vadFrame=requestAnimationFrame(tick);return;}
+      if(rms>.008){heard=true;lastLoud=now;}
+      if(heard&&now-lastLoud>2000&&now-start>1800){this.stop();return;}
+      if(!heard&&now-start>10000){this.setState('recording','در حال ضبط؛ برای ارسال پایان ضبط را بزنید.');return;}
       this.vadFrame=requestAnimationFrame(tick);
     };this.vadFrame=requestAnimationFrame(tick);
   }

@@ -1,3 +1,5 @@
+import os
+os.environ['CATALOG_AUTO_SYNC']='false'
 """آزمون قرارداد HTTP با پاسخ کنترل‌شده؛ آزمون دقت Google/Whisper نیست."""
 import asyncio
 import io

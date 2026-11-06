@@ -1,3 +1,4 @@
+from tests.fixtures import seed_test_products
 import unittest,tempfile,uuid,json,io,threading,asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -14,7 +15,7 @@ from sellora.catalog import preview,store_image
 class SpokenCheckout(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.patch=patch.object(db,'PATH',str(Path(self.temp.name)/'db.sqlite'));self.patch.start()
-  self.c=TestClient(app);self.c.__enter__();self.c.get('/api/session')
+  self.c=TestClient(app);self.c.__enter__();seed_test_products();self.c.get('/api/session')
   self.c.app.state.sales_model.base='';self.words='سفارش را تأیید می کنم'
   self.c.app.state.stt=HTTPSTT(STTConfig('http://stt.test'),httpx.MockTransport(lambda r:httpx.Response(200,json={'text':self.words,'engine':'google_online','language':'fa','duration_seconds':2,'processing_seconds':.1})))
   for t in ['09121110000','123456','مشتری تست','تهران','نشانی دوازده','بله','پرتقال دو کارتن']:self.turn(t)

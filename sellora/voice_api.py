@@ -20,7 +20,7 @@ def register_voice(app, sid, load):
         service = request.app.state.stt
         health = await service.health()
         return dict(**service.status(), health=health, mode=settings['mode'],
-                    max_upload_bytes=service.config.max_bytes, recording_limit_seconds=50,
+                    max_upload_bytes=service.config.max_bytes, recording_limit_seconds=50,request_timeout_seconds=service.config.online_timeout+service.config.offline_timeout+15,
                     note='تبدیل پس از پایان ضبط انجام می‌شود؛ پاسخ دستیار فعلاً متنی است.')
 
     @app.post('/api/voice/transcribe')

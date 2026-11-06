@@ -21,21 +21,25 @@ def init():
     with connect() as c:
         for migration in sorted((ROOT/'migrations').glob('*.sql')):
             c.executescript(migration.read_text())
-        if not c.execute('SELECT 1 FROM products LIMIT 1').fetchone():
-            products=[('DEMO-OR-1','نوشیدنی پرتقال','پرتقال','۱ لیتر','#f8a83a',180000,24),('DEMO-MA-1','نوشیدنی انبه','انبه','۱ لیتر','#ffc24d',210000,18),('DEMO-AP-1','نوشیدنی سیب','سیب','۱ لیتر','#87ad72',175000,30),('DEMO-WA-05','آب آشامیدنی','ساده','۵۰۰ میلی‌لیتر','#6dbde1',96000,40),('DEMO-GR-1','مخلوط حبوبات','مخلوط','۵۰۰ گرم','#7086ac',240000,15)]
-            c.execute('BEGIN IMMEDIATE')
-            for sku,name,flavor,size,color,price,stock in products:
-                p=dict(sku=sku,name=name,flavor=flavor,size=size,brand='برند نمونه',category='نوشیدنی آزمایشی',packaging='بطری',per_carton=12,unit='کارتن',minimum=1,color=color,aliases=[flavor],source='داده آزمایشی')
-                if sku=='DEMO-GR-1':p.update(category='حبوبات آزمایشی',image_url='/static/images/catalog-editorial.jpg',image_kind='reference',image_credit='عکس مرجع واقعی حبوبات؛ تصویر بسته‌بندی این SKU نیست. منبع: Open Food Facts contributors')
-                c.execute('INSERT INTO products VALUES(?,?,1)',(sku,json.dumps(p,ensure_ascii=False)))
-                c.execute('INSERT INTO prices VALUES(?,?,1)',(sku,price))
-                c.execute('INSERT INTO inventory VALUES(?,?,1)',(sku,stock))
-            c.execute("INSERT OR IGNORE INTO settings VALUES(1,?)",(json.dumps(dict(mode='auto',style='گرم و محترمانه',suggestion_limit=1,expert_required=False)),))
-            c.commit()
+        # داده نمونه در اجرای عادی ساخته نمی‌شود. رکوردهای قدیمی برای حفظ رسیدها
+        # باقی می‌مانند ولی کالاهای نمونه قبلی از فروش خارج می‌شوند.
+        for row in c.execute('SELECT sku,data FROM products').fetchall():
+            p=json.loads(row['data'])
+            if row['sku'] in ('DEMO-OR-1','DEMO-MA-1','DEMO-AP-1','DEMO-WA-05','DEMO-GR-1') and p.get('source')=='داده آزمایشی':
+                c.execute('UPDATE products SET active=0 WHERE sku=?',(row['sku'],))
+        c.execute("INSERT OR IGNORE INTO settings VALUES(1,?)",(json.dumps(dict(mode='auto',style='گرم و محترمانه',suggestion_limit=0,expert_required=True)),))
+
 
 def products(c):
     rows=c.execute('SELECT p.data,p.active,r.amount,r.version AS price_version,i.quantity,i.version AS stock_version FROM products p JOIN prices r USING(sku) JOIN inventory i USING(sku)').fetchall()
-    return [dict(json.loads(r['data']),active=bool(r['active']),price=r['amount'],stock=r['quantity'],price_version=r['price_version'],stock_version=r['stock_version']) for r in rows]
+    result=[]
+    for r in rows:
+        p=dict(brand='',category='',flavor='',size='',packaging='',per_carton=None,unit=None,minimum=None,aliases=[],catalog_verified=False)
+        p.update(json.loads(r['data']))
+        p.update(active=bool(r['active']),price=r['amount'],stock=r['quantity'],price_version=r['price_version'],stock_version=r['stock_version'])
+        p['commercial_ready']=bool(p['unit'] and p['per_carton'] and p['minimum'] and p['price']>0)
+        result.append(p)
+    return result
 
 def audit(c,sid,kind,data):
     c.execute('INSERT INTO audit_events(session_id,kind,data) VALUES(?,?,?)',(sid,kind,json.dumps(data,ensure_ascii=False)))

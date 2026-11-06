@@ -25,7 +25,7 @@ def pdf(order):
         c.drawRightString(550,y,get_display(arabic_reshaper.reshape(chunk)));y-=28
     snap=json.loads(order['snapshot']);customer=snap['customer']
     line('Sellora | '+('پیش‌فاکتور' if snap['expert_required'] else 'رسید سفارش'),True)
-    line('داده و سفارش آزمایشی — فاکتور رسمی یا پرداخت موفق نیست')
+    line('این رسید، تأیید پرداخت نیست.')
     line('شماره سفارش: '+order['id'])
     dt=datetime.fromisoformat(order['created']).astimezone(ZoneInfo('Asia/Tehran'))
     # تبدیل شمسی با کتابخانه مستقل، زمان مرجع UTC است.

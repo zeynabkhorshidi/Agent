@@ -1,0 +1,11 @@
+{
+  "normal_store_has_no_demo_products": true,
+  "unrelated_photos_removed": true,
+  "sunich_real_photo_not_fabricated": true,
+  "no_developer_footer": true,
+  "microphone_sent_pcm_wav_16khz_mono": true,
+  "quiet_recording_not_discarded": true,
+  "mobile_overflow": false,
+  "javascript_errors": [],
+  "real_catalog_and_stt": "blocked from build environment; not validated"
+}

@@ -7,3 +7,11 @@
 pre,code{font-family:IRANSansX,Tahoma,sans-serif} .product-badge.reference{background:#eaf0ff;color:#1a37b8}
 
 .primary svg,.mic svg{width:18px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.mic{display:grid;place-items:center}
+
+.hero-brand-fallback{height:100%;min-height:300px;display:flex;align-items:center;justify-content:center;background:#193362;color:white;font-size:clamp(50px,7vw,110px);font-weight:800;padding-bottom:80px}.voice-tools summary{font-size:12px;color:var(--muted);cursor:pointer;padding:5px 0 10px}.recording-consent{font-size:11px;color:var(--muted);padding:10px 23px 16px}.product-badge,.catalog-note{display:none}.catalog:has(>.empty){grid-template-columns:1fr}.catalog>.empty{border:1px solid var(--border);border-radius:12px;background:var(--soft)}
+
+.recording-controls{display:flex;gap:8px;padding:0 23px}.recording-controls button{font-size:12px}.recording-controls:has([hidden]):not(:has(button:not([hidden]))){display:none}
+
+.product-visual:not(:has(img)){display:none}.editorial-photo:has(img:not([hidden])){background:white}.editorial-photo:has(img:not([hidden])) img{object-fit:contain;padding:20px;filter:none}.editorial-photo:has(img:not([hidden])) .photo-caption{display:none}
+
+.product-name{font-size:inherit;font-weight:inherit;padding:0;border:0;background:transparent;text-align:right}.product-visual{padding:0;border:0;width:calc(100% - 20px)}

@@ -1,0 +1,13 @@
+{
+  "iran_sans_loaded": true,
+  "catalog_search_details_sort": true,
+  "text_profile_and_cart": true,
+  "voice_only_final_confirmation_with_quote_binding": true,
+  "pdf_download": true,
+  "all_voice_profile_to_order_without_send_button": true,
+  "mobile_no_overflow_and_cart_drawer": true,
+  "admin_direct_login": true,
+  "javascript_errors": [],
+  "company_stt": "unverified; controlled HTTP fixture used",
+  "live_catalog": "unavailable"
+}

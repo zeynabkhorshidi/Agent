@@ -2,7 +2,7 @@
 این ابزار تنها مشخصات کالا را وارد می‌کند. قیمت و موجودی واقعی از منبع تجاری مستقل لازم است.
 """
 import json,sys,re
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,field_validator
 from . import db
 class Product(BaseModel):
     sku:str=Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
@@ -17,7 +17,14 @@ class Product(BaseModel):
     minimum:int=Field(ge=1,le=10000)
     aliases:list[str]=Field(default_factory=list,max_length=50)
     source:str=Field(min_length=3,max_length=500)
+    image_url:str|None=Field(default=None,pattern=r'^/(?:media|static/images)/[A-Za-z0-9_./-]+$')
     color:str=Field(default='#7388af',pattern=r'^#[0-9a-fA-F]{6}$')
+    @field_validator('image_url')
+    @classmethod
+    def safe_image(cls,value):
+        if value and '..' in value:raise ValueError('مسیر عکس معتبر نیست')
+        return value
+
 def main(path):
     data=json.load(open(path));items=[Product.model_validate(x).model_dump() for x in data]
     if len({x['sku'] for x in items})!=len(items):raise ValueError('شناسه تکراری در فایل')

@@ -8,7 +8,7 @@ from bidi.algorithm import get_display
 import arabic_reshaper
 
 def pdf(order):
-    font=pathlib.Path(__file__).resolve().parents[1]/'web/pdf-font.ttf'
+    font=pathlib.Path(__file__).resolve().parents[1]/'web/fonts/iransansx-fanum.ttf'
     pdfmetrics.registerFont(TTFont('Persian',str(font)))
     out=io.BytesIO();c=canvas.Canvas(out,pagesize=(595,842));c.setTitle('Sellora - '+order['id']);y=800
     def line(s,big=False):
@@ -16,7 +16,7 @@ def pdf(order):
         if y<60:c.showPage();y=800
         c.setFont('Persian',16 if big else 11)
         # شکستن سطر با اندازه واقعی فونت؛ متن و خروجی فقط سمت سرور
-        words=str(s).split();chunk=''
+        words=str(s).replace('—','-').replace('–','-').split();chunk=''
         for w in words:
             test=(chunk+' '+w).strip()
             if pdfmetrics.stringWidth(get_display(arabic_reshaper.reshape(test)),'Persian',11)>490:

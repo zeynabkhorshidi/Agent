@@ -24,12 +24,15 @@ def register_voice(app, sid, load):
                     note='تبدیل پس از پایان ضبط انجام می‌شود؛ پاسخ دستیار فعلاً متنی است.')
 
     @app.post('/api/voice/transcribe')
-    async def transcribe(request: Request, file: UploadFile = File(...), turn_id: str = Form(...)):
+    async def transcribe(request: Request, file: UploadFile = File(...), turn_id: str = Form(...), quote_id: str = Form('')):
         value = sid(request)
         # نشست پیش از خواندن و ارسال فایل کنترل می‌شود.
         with db.connect() as c:
             load(c, value)
             settings = json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
+            if quote_id and not c.execute('SELECT 1 FROM quotes WHERE id=? AND session_id=? AND expires>?',(quote_id,value,int(time.time()))).fetchone():
+                await file.close()
+                raise HTTPException(409,'مرور سفارش تغییر کرده یا منقضی شده است.')
         if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', turn_id):
             await file.close()
             raise HTTPException(400, 'شناسه نوبت صوت معتبر نیست.')
@@ -49,7 +52,7 @@ def register_voice(app, sid, load):
         if not audio:
             raise HTTPException(400, 'فایل صوتی خالی است.')
         # نام اصلی فایل و متن گفتار وارد لاگ یا fingerprint نمی‌شوند.
-        fingerprint = hashlib.sha256(bytes(audio) + settings['mode'].encode()).hexdigest()
+        fingerprint = hashlib.sha256(bytes(audio) + settings['mode'].encode() + quote_id.encode()).hexdigest()
         now = int(time.time())
         with db.connect() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -76,7 +79,7 @@ def register_voice(app, sid, load):
         try:
             result, fallback = await service.transcribe(bytes(audio), 'voice' + suffix,
                                                          file.content_type or 'application/octet-stream', settings['mode'])
-            payload = dict(turn_id=turn_id, text=result.text, engine=result.engine,
+            payload = dict(turn_id=turn_id, quote_id=quote_id or None, text=result.text, engine=result.engine,
                            language=result.language, duration_seconds=result.duration_seconds,
                            processing_seconds=result.processing_seconds, fallback=fallback,
                            elapsed_ms=round((time.perf_counter() - started) * 1000, 2))

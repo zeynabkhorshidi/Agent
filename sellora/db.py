@@ -22,10 +22,11 @@ def init():
         for migration in sorted((ROOT/'migrations').glob('*.sql')):
             c.executescript(migration.read_text())
         if not c.execute('SELECT 1 FROM products LIMIT 1').fetchone():
-            products=[('DEMO-OR-1','نوشیدنی پرتقال','پرتقال','۱ لیتر','#f8a83a',180000,24),('DEMO-MA-1','نوشیدنی انبه','انبه','۱ لیتر','#ffc24d',210000,18),('DEMO-AP-1','نوشیدنی سیب','سیب','۱ لیتر','#87ad72',175000,30),('DEMO-WA-05','آب آشامیدنی','ساده','۵۰۰ میلی‌لیتر','#6dbde1',96000,40)]
+            products=[('DEMO-OR-1','نوشیدنی پرتقال','پرتقال','۱ لیتر','#f8a83a',180000,24),('DEMO-MA-1','نوشیدنی انبه','انبه','۱ لیتر','#ffc24d',210000,18),('DEMO-AP-1','نوشیدنی سیب','سیب','۱ لیتر','#87ad72',175000,30),('DEMO-WA-05','آب آشامیدنی','ساده','۵۰۰ میلی‌لیتر','#6dbde1',96000,40),('DEMO-GR-1','مخلوط حبوبات','مخلوط','۵۰۰ گرم','#7086ac',240000,15)]
             c.execute('BEGIN IMMEDIATE')
             for sku,name,flavor,size,color,price,stock in products:
                 p=dict(sku=sku,name=name,flavor=flavor,size=size,brand='برند نمونه',category='نوشیدنی آزمایشی',packaging='بطری',per_carton=12,unit='کارتن',minimum=1,color=color,aliases=[flavor],source='داده آزمایشی')
+                if sku=='DEMO-GR-1':p.update(category='حبوبات آزمایشی',image_url='/static/images/catalog-editorial.jpg',image_kind='reference',image_credit='عکس مرجع واقعی حبوبات؛ تصویر بسته‌بندی این SKU نیست. منبع: Open Food Facts contributors')
                 c.execute('INSERT INTO products VALUES(?,?,1)',(sku,json.dumps(p,ensure_ascii=False)))
                 c.execute('INSERT INTO prices VALUES(?,?,1)',(sku,price))
                 c.execute('INSERT INTO inventory VALUES(?,?,1)',(sku,stock))

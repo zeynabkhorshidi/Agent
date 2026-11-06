@@ -1,9 +1,9 @@
 /* دریافت گفتار فقط از STT شرکت؛ هیچ Web Speech API یا TTS جایگزین به کار نمی‌رود. */
 export class VoiceController {
-  constructor({onDraft,onStatus,onError,canStart}) {
-    Object.assign(this,{onDraft,onStatus,onError,canStart});
+  constructor({onDraft,onStatus,onError,canStart,getQuote,autoStop}) {
+    Object.assign(this,{onDraft,onStatus,onError,canStart,getQuote,autoStop});
     this.generation=0;this.recorder=null;this.stream=null;this.controller=null;this.turnId=null;
-    this.state='idle';this.chunks=[];this.timer=null;this.limitTimer=null;this.limit=50;this.maxBytes=25*1024*1024;
+    this.state='idle';this.chunks=[];this.vadFrame=null;this.audioContext=null;this.timer=null;this.limitTimer=null;this.limit=50;this.maxBytes=25*1024*1024;
   }
   setState(state,label){this.state=state;this.onStatus(state,label);}
   async status(){
@@ -12,7 +12,7 @@ export class VoiceController {
     this.maxBytes=b.max_upload_bytes;this.limit=b.recording_limit_seconds;
     return b;
   }
-  stopTracks(){this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;clearInterval(this.timer);clearTimeout(this.limitTimer);}
+  stopTracks(){cancelAnimationFrame(this.vadFrame);this.vadFrame=null;this.audioContext?.close().catch(()=>{});this.audioContext=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;clearInterval(this.timer);clearTimeout(this.limitTimer);}
   async start(deviceId=''){
     if(!this.canStart()){this.onError('منتظر پایان نوبت فعلی بمانید.');return;}
     this.cancel();const generation=++this.generation;
@@ -38,7 +38,7 @@ export class VoiceController {
         const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';
         this.upload(blob,'voice.'+ext,generation);
       };
-      recorder.start(250);this.started=Date.now();this.setState('recording','در حال ضبط · ۰ ثانیه');
+      recorder.start(250);this.started=Date.now();if(this.autoStop?.())this.watchSilence(stream,generation);this.setState('recording','در حال ضبط · ۰ ثانیه');
       this.timer=setInterval(()=>{if(generation===this.generation)this.setState('recording','در حال ضبط · '+new Intl.NumberFormat('fa-IR').format(Math.floor((Date.now()-this.started)/1000))+' ثانیه');},1000);
       this.limitTimer=setTimeout(()=>this.stop(),this.limit*1000);
       return true;
@@ -55,15 +55,27 @@ export class VoiceController {
     if(generation!==this.generation)return;
     this.setState('processing','در حال تبدیل گفتار به متن');
     this.turnId=crypto.randomUUID();const turnId=this.turnId;
-    this.controller=new AbortController();const form=new FormData();form.append('file',blob,filename);form.append('turn_id',turnId);
+    this.controller=new AbortController();const form=new FormData();form.append('file',blob,filename);form.append('turn_id',turnId);const quoteId=this.getQuote?.();if(quoteId)form.append('quote_id',quoteId);
     try{
       const r=await fetch('/api/voice/transcribe',{method:'POST',body:form,signal:this.controller.signal});const b=await r.json();
       if(generation!==this.generation)return;
       if(!r.ok)throw Error(typeof b.detail==='string'?b.detail:'تبدیل گفتار انجام نشد. فایل دیگری امتحان کنید یا متنی ادامه دهید.');
       if(b.turn_id!==turnId)return;
-      this.onDraft(b);this.setState('draft','متن آماده بررسی شماست');
+      this.controller=null;this.turnId=null;this.onDraft(b);if(generation===this.generation)this.setState('draft','متن آماده بررسی شماست');
     }catch(e){if(generation!==this.generation||e.name==='AbortError')return;this.setState('idle','ورود متنی آماده');this.onError(e instanceof TypeError?'ارتباط با سرور قطع شد؛ سبد محفوظ است. دوباره تلاش کنید یا متنی ادامه دهید.':e.message);}
     finally{if(generation===this.generation){this.controller=null;this.turnId=null;}}
+  }
+  watchSilence(stream,generation){
+    const Context=window.AudioContext||window.webkitAudioContext;if(!Context)return;
+    this.audioContext=new Context();const source=this.audioContext.createMediaStreamSource(stream);const analyser=this.audioContext.createAnalyser();analyser.fftSize=1024;source.connect(analyser);
+    const data=new Uint8Array(analyser.fftSize);let heard=false,lastLoud=performance.now(),start=performance.now();
+    const tick=()=>{if(generation!==this.generation||this.recorder?.state!=='recording')return;
+      analyser.getByteTimeDomainData(data);let sum=0;for(const v of data)sum+=((v-128)/128)**2;const rms=Math.sqrt(sum/data.length),now=performance.now();
+      if(rms>.025){heard=true;lastLoud=now;}
+      if(heard&&now-lastLoud>1400&&now-start>1800){this.stop();return;}
+      if(!heard&&now-start>10000){this.cancel();this.onError('صدایی شنیده نشد. هر وقت آماده بودید دوباره شروع کنید یا بنویسید.');return;}
+      this.vadFrame=requestAnimationFrame(tick);
+    };this.vadFrame=requestAnimationFrame(tick);
   }
   cancel(){
     ++this.generation;this.controller?.abort();this.controller=null;

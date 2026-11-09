@@ -36,7 +36,7 @@ class CatalogOnly(unittest.IsolatedAsyncioTestCase):
    image='/image/a.png' if r.url.path.endswith('a') else '/image/b.png'
    html='<script type="application/ld+json">'+json.dumps({'@type':'Product','name':name,'sku':'P'+r.url.path[-1],'brand':'سن‌ایچ','image':image})+'</script>'
    return httpx.Response(200,text=html,headers={'Content-Type':'text/html'})
-  service=CatalogSync(httpx.MockTransport(transport));result=await service.run();self.assertEqual(result['products'],2);self.assertEqual(result['images'],2);self.assertTrue(result['complete']);self.assertEqual(result['pages'],3)
+  service=CatalogSync(httpx.MockTransport(transport),mode='html');result=await service.run();self.assertEqual(result['products'],2);self.assertEqual(result['images'],2);self.assertTrue(result['complete']);self.assertEqual(result['pages'],3)
   self.assertEqual(set(calls),{'/','/p/a','/p/b','/image/a.png','/image/b.png'})
   with TestClient(app) as client:
    state=client.get('/api/session').json();self.assertEqual({p['name'] for p in state['products']},{'آبمیوه سن‌ایچ','کالای دوم کاتالوگ'});self.assertTrue(state['hero_image'].startswith('/media/'))
@@ -59,5 +59,5 @@ class CatalogOnly(unittest.IsolatedAsyncioTestCase):
   calls=[]
   def handler(r):
    calls.append(str(r.url));return httpx.Response(200,text='<script type="application/ld+json">'+json.dumps({'@type':'Product','name':'محصول واقعی','sku':'R','image':'http://127.0.0.1/private.png'})+'</script>',headers={'Content-Type':'text/html'})
-  await CatalogSync(httpx.MockTransport(handler)).run();self.assertEqual(len(calls),1)
+  await CatalogSync(httpx.MockTransport(handler),mode='html').run();self.assertEqual(len(calls),1)
   with db.connect() as c:p=json.loads(c.execute('SELECT data FROM products').fetchone()[0]);self.assertIsNone(p['image_url'])

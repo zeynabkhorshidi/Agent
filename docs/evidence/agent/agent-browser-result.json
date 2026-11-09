@@ -1,0 +1,11 @@
+{
+  "returning_customer_no_profile_reentry": true,
+  "private_data_hidden_before_verification": true,
+  "reorder_requires_consent": true,
+  "order_and_pdf": true,
+  "customer_file_and_transcript": true,
+  "iran_sans_and_branding": true,
+  "mobile_no_overflow": true,
+  "javascript_errors": [],
+  "live_company_connections": "not verified; controlled fixtures only"
+}

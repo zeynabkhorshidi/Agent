@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from . import db
 from .domain import normalize, mobile, quantity, find_products
+from .sales_flow import prompt_options, selected_product, resolve_selection
 
 PRODUCTION=os.getenv('SELLORA_ENV','development')=='production'
 COOKIE='sellora_session'
@@ -48,11 +49,12 @@ def save_cart(c,sid,items):
 def view(c,sid):
     r,s=load(c,sid); rev,items=cart(c,sid)
     customer=dict(c.execute('SELECT * FROM customers WHERE id=?',(r['customer_id'],)).fetchone()) if r['customer_id'] else None
-    ps=[p for p in db.products(c) if p.get('catalog_verified')]; by={p['sku']:p for p in ps}
+    all_products=[p for p in db.products(c) if p.get('catalog_verified')]
+    ps=[p for p in all_products if p.get('catalog_present',True)]; by={p['sku']:p for p in all_products}
     lines=[dict(by[k],quantity=n,total=by[k]['price']*n) for k,n in items.items() if k in by]
     history=[dict(x) for x in c.execute('SELECT role,text FROM conversations WHERE session_id=? ORDER BY id DESC LIMIT 60',(sid,)).fetchall()][::-1]
-    hero=next((p.get('image_url') for p in ps if p.get('image_url') and any(b in normalize(p.get('brand','')+' '+p['name']).lower().replace(' ','') for b in ('سنایچ','sunich'))),None)
-    return dict(hero_image=hero,customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,demo=True)
+    hero=next((p.get('image_url') for p in ps if p.get('image_url') and any(b in normalize(' '.join([p.get('brand',''),p['name'],p.get('category',''),p.get('subcategory','')])).lower().replace(' ','') for b in ('سنایچ','sunich'))),None)
+    return dict(hero_image=hero,customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,choices=s.get('choices',[]),demo_catalog=os.getenv('SELLORA_DEMO_MODE','false').lower()=='true',demo=True)
 
 def next_question(customer,s):
     if not customer:return 'شماره موبایلتان را وارد کنید. احراز این نسخه آزمایشی است.'
@@ -65,6 +67,16 @@ def next_question(customer,s):
 async def lifespan(app):
     if PRODUCTION: raise RuntimeError('این توزیع آزمایشی است؛ استقرار عملیاتی نیازمند احراز و منابع تجاری واقعی است. راهنمای استقرار را بخوانید.')
     db.init()
+    with db.connect() as c:
+        demo_database=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]).get('demo_database',False)
+    if demo_database and os.getenv('SELLORA_DEMO_MODE','false').lower()!='true':
+        raise RuntimeError('این پایگاه داده مخصوص نمایش است. راه‌انداز start-demo را اجرا کنید یا پایگاه داده عادی را انتخاب کنید.')
+    if os.getenv('SELLORA_SEED_CUSTOMERS','false').lower()=='true':
+        from .demo import seed_customers
+        seed_customers()
+    if os.getenv('SELLORA_DEMO_MODE','false').lower()=='true':
+        from .demo import prepare_demo
+        prepare_demo()
     from .stt import HTTPSTT, STTConfig
     app.state.stt = HTTPSTT(STTConfig.from_env())
     from .intelligence import SalesModel, SpeechOutput
@@ -150,8 +162,9 @@ async def turn(body:Turn,request:Request):
         if prior:return repeated_turn(c,value,body,prior['text'])
     # تماس مدل خارج از تراکنش؛ تأیید نهایی هرگز از خروجی مدل استنباط نمی‌شود.
     model=request.app.state.sales_model
-    reserved=text in ('همین کافیه','مرور سفارش','تأیید سفارش','تایید سفارش','توقف','ادامه بده','از اول','پاک کردن سبد','سفارش را تایید می کنم','سفارش را تأیید می کنم')
-    plan=await model.plan(text,products,initial_items) if initial.get('stage')=='shopping' and not reserved and not initial.get('paused') else None
+    reserved=text in ('همین کافیه','مرور سفارش','تأیید سفارش','تایید سفارش','توقف','ادامه بده','از اول','پاک کردن سبد','سفارش را تایید می کنم','سفارش را تأیید می کنم','سفارش قبلی','بله اقلام قبلی','نه سفارش جدید')
+    broad_selection=len(find_products(text,products))>1 and not re.search(r'\s+و\s+|،',text)
+    plan=await model.plan(text,products,initial_items) if initial.get('stage')=='shopping' and not reserved and not broad_selection and not initial.get('paused') and not initial.get('selection') else None
     with db.connect() as c:
         c.execute('BEGIN IMMEDIATE');_,s=load(c,value)
         prior=c.execute("SELECT text FROM conversations WHERE session_id=? AND turn_id=? AND role='assistant'",(value,body.turn_id)).fetchone()
@@ -180,7 +193,8 @@ async def turn(body:Turn,request:Request):
         if body.quote_id and not actions.get('order') and cart(c,value)[0]!=initial_rev:
             if cart(c,value)[1]:actions['quote']=create_quote(c,value);reply=actions['quote']['speech_summary']
             else:actions['close_quote']=True
-        safe=re.sub(r'\d{4,}', '••••',text)
+        # Preserve order dialogue, including SKU and quantities, but never retain OTPs.
+        safe='[کد احراز حذف شد]' if initial.get('stage')=='otp' else re.sub(r'(?<!\d)09\d{9}(?!\d)','[شماره موبایل]',text)
         c.execute('INSERT INTO conversations(session_id,turn_id,role,text) VALUES(?,?,?,?)',(value,body.turn_id,'user',safe))
         c.execute('INSERT INTO conversations(session_id,turn_id,role,text) VALUES(?,?,?,?)',(value,body.turn_id,'assistant',reply))
         persist(c,value,s);db.audit(c,value,'turn.completed',{'turn_id':body.turn_id,'ms':round((time.perf_counter()-start)*1000,2),'model_used':bool(plan)})
@@ -208,7 +222,8 @@ def handle(c,value,s,text):
     # اطلاعاتی که خود مشتری زودتر گفته نگه می‌ماند؛ منبع هویت نیست.
     patterns={'name':r'(?:اسمم|نامم|نام من)\s+([^،,]+?)(?=\s+(?:شهرم|آدرسم|شماره)|[،,]|$)',
               'city':r'(?:شهرم|شهر من)\s+([^،,]+?)(?=\s+(?:آدرسم|شماره)|[،,]|$)',
-              'address':r'(?:آدرسم|نشانی من)\s+([^،]+)'}
+              'address':r'(?:آدرسم|نشانی من)\s+([^،]+)',
+              'business':r'(?:نام فروشگاهم|نام فروشگاه من|فروشگاهم)\s+([^،]+)'}
     for key,pattern in patterns.items():
         match=re.search(pattern,text)
         if match:s.setdefault('provided',{})[key]=match.group(1).strip()[:500]
@@ -223,6 +238,8 @@ def handle(c,value,s,text):
         return 'درخواست تماس در فهرست آزمایشی ثبت شد. اتصال تلفنی یا ارسال به کارشناس واقعی برقرار نیست.'
     row,_=load(c,value)
     if not row['customer_id']:
+        if s.get('stage')!='otp' and find_products(text,[p for p in db.products(c) if p.get('catalog_verified')]):
+            s['pending_product']=text
         if s.get('stage')=='otp':
             if time.time()>s.get('otp_expires',0):s['stage']='mobile';return 'مهلت کد تمام شد. شماره را دوباره وارد کنید.'
             s['attempts']=s.get('attempts',0)+1
@@ -239,7 +256,7 @@ def handle(c,value,s,text):
             if prev:save_cart(c,value,json.loads(prev['items']))
             s['stage']='name';customer=auth(c,value)
             for key,val in s.pop('provided',{}).items():
-                if key in ('name','city','address') and not customer[key]:c.execute(f'UPDATE customers SET {key}=? WHERE id=?',(val,customer['id']))
+                if key in ('name','city','address','business') and not customer[key]:c.execute(f'UPDATE customers SET {key}=? WHERE id=?',(val,customer['id']))
             customer=auth(c,value)
             return 'هویت صرفاً در محیط آزمایشی تأیید شد. '+next_question(customer,s)
         if time.time()<s.get('locked_until',0):return 'لطفاً یک دقیقه برای تلاش بعدی صبر کنید.'
@@ -252,6 +269,8 @@ def handle(c,value,s,text):
         return 'شماره «'+ ' '.join(phone)+'» را بررسی کنید. هیچ پیامکی ارسال نشده؛ برای تأیید آزمایشی کد ۱۲۳۴۵۶ را وارد کنید. اگر شماره اشتباه است، صفحه خروج را بزنید.'
     customer=auth(c,value)
     stage=s.get('stage')
+    if s.get('provided',{}).get('business'):
+        c.execute('UPDATE customers SET business=? WHERE id=?',(s['provided'].pop('business'),customer['id']))
     if stage in ('name','city','address'):
         value_text=s.get('provided',{}).get(stage,text)
         value_text=re.sub(r'^(?:من |اسمم |نامم |نام من |شهرم |شهر من |آدرسم |نشانی من )','',value_text).strip()
@@ -268,35 +287,62 @@ def handle(c,value,s,text):
     if text=='سفارش قبلی':
         order=c.execute('SELECT id,snapshot FROM orders WHERE customer_id=? ORDER BY created DESC LIMIT 1',(customer['id'],)).fetchone()
         if not order:return 'هنوز سفارش آزمایشی قبلی ندارید.'
-        snap=json.loads(order['snapshot']);return 'آخرین سفارش: '+ '، '.join(f"{i['name']}، {i['quantity']} کارتن" for i in snap['items'])+'؛ برای افزودن، نام و تعداد موردنظر را بفرمایید.'
+        snap=json.loads(order['snapshot']);s['pending_reorder']=[{'sku':i['sku'],'quantity':i['quantity']} for i in snap['items']]
+        s['choices']=[{'label':'بله، اقلام قبلی','text':'بله اقلام قبلی'},{'label':'سفارش جدید','text':'نه سفارش جدید'}]
+        return 'آخرین سفارش: '+ '، '.join(f"{i['name']}، {i['quantity']} کارتن" for i in snap['items'])+'. همین اقلام را با قیمت و موجودی فعلی به سبد اضافه کنم؟'
     if text in ('همین کافیه','مرور سفارش','تأیید سفارش','تایید سفارش'):
         return 'برای دیدن جمع معتبر و تأیید صریح، دکمه «مرور سفارش» در سبد را بزنید. پیام متنی به‌تنهایی سفارش ثبت نمی‌کند.'
     return shopping(c,value,s,text)
 
 def shopping(c,value,s,text):
-    rev,items=cart(c,value);ps=[p for p in db.products(c) if p.get('catalog_verified')]
-    if text in ('نه','نمی‌خوام','پیشنهاد نمی‌خواهم'):s['rejected']=True;return 'پیشنهاد دیگری مطرح نمی‌کنم. می‌توانید سفارش را مرور کنید.'
+    rev,items=cart(c,value);ps=[p for p in db.products(c) if p.get('catalog_verified') and p.get('catalog_present',True)]
+    if text=='نه سفارش جدید':
+        s.pop('pending_reorder',None);s['choices']=[];return 'چه محصولی برای این سفارش می‌خواهید؟'
+    if text=='بله اقلام قبلی' and s.get('pending_reorder'):
+        by={p['sku']:p for p in ps};lines=s['pending_reorder']
+        for line in lines:
+            p=by.get(line['sku']);n=line['quantity']
+            if not p or not p['active'] or not p['commercial_ready'] or n<p['minimum'] or n>p['stock']:
+                return 'بعضی اقلام سفارش قبلی با شرایط فعلی قابل سفارش نیستند؛ لطفاً محصول و تعداد جایگزین را انتخاب کنید.'
+        for line in lines:items[line['sku']]=line['quantity']
+        save_cart(c,value,items);s.pop('pending_reorder',None);s.pop('selection',None);s['choices']=[]
+        return 'اقلام قبلی با قیمت فعلی به سبد اضافه شدند. محصول دیگری می‌خواهید یا سفارش را مرور کنیم؟'
+    if text in ('نه','نمی‌خوام','پیشنهاد نمی‌خواهم'):
+        s['rejected']=True;return 'پیشنهاد دیگری مطرح نمی‌کنم. می‌توانید سفارش را مرور کنید.'
+    if text=='انتخاب دوباره':
+        s.pop('selection',None);s['choices']=[];return 'چه محصولی در نظر دارید؟'
     if text in ('حذفش کن','اولی رو حذف کن'):
         sku=s.get('last_sku') if text=='حذفش کن' else next(iter(items),None)
         if not sku or sku not in items:return 'کدام محصول را حذف کنم؟ نام آن را بفرمایید.'
-        del items[sku];save_cart(c,value,items);return 'قلم از سبد حذف شد.'
-    parts=re.split(r'\s+و\s+|،',text);changes=[];questions=[]
+        del items[sku];save_cart(c,value,items);s.pop('selection',None);s['choices']=[];return 'قلم از سبد حذف شد.'
+    resolved,selected_quantity,selection_reply=resolve_selection(s,text,ps)
+    if selection_reply:return selection_reply
+    parts=[text] if resolved else re.split(r'\s+و\s+|،',text);changes=[];questions=[]
     for part in parts:
-        found=find_products(part,ps)
+        found=resolved if resolved else find_products(part,ps)
         if not found:continue
-        if len(found)>1:questions.append('کدام مورد؟ '+ ' یا '.join(p['name']+' '+p['size'] for p in found));continue
+        n=selected_quantity if selected_quantity is not None else quantity(part)
+        if len(found)>1:
+            questions.append(prompt_options(s,found))
+            if n is not None:s['selection']['quantity']=n
+            continue
         p=found[0];sku=p['sku'];s['last_sku']=sku
-        if 'حذف' in part:items.pop(sku,None);changes.append(p['name']+' حذف شد');continue
-        n=quantity(part)
-        if n is None:questions.append('چند کارتن '+p['name']+' نیاز دارید؟ لطفاً نام و تعداد را با هم بگویید.');continue
-        if 'کارتن' not in part and sku not in items:questions.append('منظورتان '+str(n)+' کارتن '+p['name']+' است؟ برای تأیید نام، تعداد و «کارتن» را بگویید.');continue
+        if 'حذف' in part:
+            items.pop(sku,None);changes.append(p['name']+' حذف شد');s.pop('selection',None);s['choices']=[];continue
+        if n is None:questions.append(selected_product(s,p));continue
+        if sku not in items and (re.search(r'\b(?:تا|عدد)\b',part) or ('کارتن' not in part and selected_quantity is None)):
+            s['selection']={'kind':'unit','sku':sku,'quantity':n}
+            s['choices']=[{'label':'بله، کارتن','text':'بله کارتن'},{'label':'انتخاب دوباره','text':'انتخاب دوباره'}]
+            questions.append('منظورتان '+str(n)+' کارتن '+p['name']+' است؟');continue
         if not p['active'] or not p.get('commercial_ready'):
             questions.append(p['name']+' برای ثبت سفارش نیاز به استعلام فروش دارد.');continue
-        if n<p['minimum'] or n>p['stock']:questions.append(p['name']+' با این تعداد موجود نیست؛ موجودی '+str(p['stock'])+' کارتن است.');continue
-        items[sku]=n;changes.append(p['name']+'، '+str(n)+' کارتن')
+        if n<p['minimum'] or n>p['stock']:
+            questions.append('تعداد قابل سفارش '+p['name']+' از '+str(p['minimum'])+' تا '+str(p['stock'])+' کارتن است.');continue
+        items[sku]=n;changes.append(p['name']+'، '+str(n)+' کارتن');s.pop('selection',None);s['choices']=[]
     if changes:save_cart(c,value,items)
     reply='؛ '.join(changes+questions)
-    if not reply:reply='نام یا تعداد روشن نیست. نام محصول و تعداد کارتن را بگویید یا از کارت محصول انتخاب کنید.'
+    if changes and not questions:reply+=' به سبد اضافه شد. محصول دیگری می‌خواهید یا سفارش را مرور کنیم؟'
+    if not reply:reply='نام محصول را بفرمایید؛ اگر انتخاب کرده‌اید، تعداد کارتن را بگویید.'
     return reply
 
 class CartChange(BaseModel):
@@ -323,9 +369,10 @@ def create_quote(c,value):
     v=view(c,value)
     if not v['cart']['items']:fail('هنوز کالایی به سبد اضافه نکرده‌اید.')
     for p in v['cart']['items']:
-        if p['quantity']>p['stock'] or not p['active']:fail('موجودی تغییر کرده است. سبد را اصلاح کنید.',409)
+        if p['quantity']>p['stock'] or not p['active'] or not p['commercial_ready'] or p['quantity']<p['minimum']:fail('شرایط فروش یا موجودی تغییر کرده است. سبد را اصلاح کنید.',409)
     settings=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
-    snapshot=dict(customer=customer,items=v['cart']['items'],total=v['cart']['total'],currency='تومان',discount=0,tax=0,shipping=0,commercial_note='هزینه ارسال، مالیات و شرایط پرداخت هنگام تأیید فروش اعلام می‌شود.',expert_required=settings['expert_required'])
+    snapshot=dict(demo=os.getenv('SELLORA_DEMO_MODE','false').lower()=='true',customer=customer,items=v['cart']['items'],total=v['cart']['total'],currency='تومان',discount=0,tax=0,shipping=0,commercial_note='هزینه ارسال، مالیات و شرایط پرداخت هنگام تأیید فروش اعلام می‌شود.',expert_required=settings['expert_required'])
+    if snapshot['demo']:snapshot['commercial_note']='محیط نمایش؛ قیمت‌ها و موجودی نمونه‌اند. '+snapshot['commercial_note']
     qid=uid();c.execute('INSERT INTO quotes VALUES(?,?,?,?,?)',(qid,value,v['cart']['revision'],D(snapshot),int(time.time())+300))
     return dict(speech_summary=quote_speech(snapshot),id=qid,revision=v['cart']['revision'],snapshot=snapshot,expires_in=300)
 
@@ -363,7 +410,8 @@ def submit_order(c,value,body):
     snap=json.loads(q['snapshot']);ps={p['sku']:p for p in db.products(c)}
     for i in snap['items']:
         p=ps[i['sku']]
-        if not p['active'] or p['price_version']!=i['price_version'] or p['stock_version']!=i['stock_version'] or p['stock']<i['quantity']:fail('قیمت یا موجودی تغییر کرده؛ مرور و تأیید دوباره لازم است.',409)
+        changed=any(p.get(key)!=i.get(key) for key in ('name','size','per_carton','unit','minimum'))
+        if changed or not p.get('catalog_present',True) or not p['commercial_ready'] or not p['active'] or p['price_version']!=i['price_version'] or p['stock_version']!=i['stock_version'] or p['stock']<i['quantity']:fail('قیمت، بسته‌بندی یا موجودی تغییر کرده؛ مرور و تأیید دوباره لازم است.',409)
     current=auth(c,value)
     if current!=snap['customer']:fail('مشخصات تغییر کرده؛ دوباره مرور کنید.',409)
     oid='SL-'+secrets.token_hex(6).upper();now=datetime.now(timezone.utc).isoformat()
@@ -411,7 +459,7 @@ def health():
         with db.connect() as c:c.execute('SELECT 1').fetchone()
         database='سالم'
     except Exception:database='قطع'
-    return dict(database=database,orders='محلی آزمایشی' if database=='سالم' else 'قطع',stt='پیکربندی‌شده؛ سلامت صوت را بررسی کنید' if os.getenv('STT_BASE_URL') else 'نشانی سرویس تنظیم نشده',tts='قرارداد ارائه نشده',llm='تنظیم‌شده؛ نیازمند بررسی' if os.getenv('LLM_BASE_URL') and os.getenv('LLM_MODEL') else 'تنظیم نشده؛ راهنمای محلی فعال است',catalog='نمونه؛ منبع واقعی در دسترس نبود',authentication='احراز آزمایشی',voice_capabilities=dict(voices=[],streaming=False,full_duplex=False,tts=False,file_upload=True))
+    return dict(database=database,orders='محلی آزمایشی' if database=='سالم' else 'قطع',stt='پیکربندی‌شده؛ سلامت صوت را بررسی کنید' if os.getenv('STT_BASE_URL') else 'نشانی سرویس تنظیم نشده',tts='قرارداد ارائه نشده',llm='تنظیم‌شده؛ نیازمند بررسی' if os.getenv('LLM_BASE_URL') and os.getenv('LLM_MODEL') else 'تنظیم نشده؛ راهنمای محلی فعال است',catalog='واردسازی از API متریال؛ وضعیت دریافت را در مدیریت بررسی کنید',authentication='احراز آزمایشی',voice_capabilities=dict(voices=[],streaming=False,full_duplex=False,tts=False,file_upload=True))
 
 class Login(BaseModel):
     password:str=Field(max_length=200)
@@ -450,7 +498,8 @@ def settings(body:Settings,request:Request):
     admin(request)
     if body.mode not in ('auto','online','offline'):fail('حالت نامعتبر است.')
     with db.connect() as c:
-        c.execute('UPDATE settings SET data=? WHERE id=1',(body.model_dump_json(),));db.audit(c,'admin','settings.changed',body.model_dump())
+        current=json.loads(c.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]);current.update(body.model_dump())
+        c.execute('UPDATE settings SET data=? WHERE id=1',(D(current),));db.audit(c,'admin','settings.changed',body.model_dump())
     return {'ok':True}
 class Commercial(BaseModel):
     sku:str
@@ -489,6 +538,36 @@ def admin_receipt(oid:str,request:Request):
         if not r:fail('سفارش وجود ندارد.',404)
         db.audit(c,'admin','receipt.downloaded',{'order_id':oid})
         return Response(pdf(dict(r)),media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="{oid}.pdf"'})
+
+@app.post('/api/admin/demo/customers')
+def demo_customers(request:Request):
+    admin(request)
+    from .demo import seed_customers
+    return seed_customers()
+
+@app.get('/api/admin/customers')
+def customer_directory(request:Request):
+    admin(request,('admin','sales'))
+    with db.connect() as c:
+        customers=[dict(r) for r in c.execute('SELECT c.*,EXISTS(SELECT 1 FROM demo_customers d WHERE d.customer_id=c.id) AS demo,(SELECT count(*) FROM orders o WHERE o.customer_id=c.id) AS order_count FROM customers c ORDER BY c.name')]
+        return {'customers':customers,'stores':[dict(r) for r in c.execute('SELECT * FROM stores ORDER BY name')]}
+
+@app.get('/api/admin/customers/{customer_id}')
+def customer_file(customer_id:str,request:Request):
+    admin(request,('admin','sales'))
+    with db.connect() as c:
+        customer=c.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone()
+        if not customer:fail('مشتری پیدا نشد.',404)
+        orders=[dict(r) for r in c.execute('SELECT id,status,created,snapshot FROM orders WHERE customer_id=? ORDER BY created DESC',(customer_id,))]
+        for order in orders:order['snapshot']=json.loads(order['snapshot'])
+        conversations=[dict(r) for r in c.execute('SELECT t.session_id,t.turn_id,t.role,t.text,t.created FROM conversations t JOIN sessions s ON s.id=t.session_id WHERE s.customer_id=? ORDER BY t.id DESC LIMIT 500',(customer_id,))][::-1]
+        db.audit(c,'admin','customer.viewed',{'customer_id':customer_id})
+        return {'customer':dict(customer),'orders':orders,'conversations':conversations}
+
+@app.get('/api/admin/catalog/images')
+def catalog_image_list(request:Request):
+    admin(request,('admin','sales'))
+    with db.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM catalog_images ORDER BY sku')]
 
 @app.get('/api/assistant/status')
 def assistant_status(request:Request):

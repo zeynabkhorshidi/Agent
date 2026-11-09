@@ -25,6 +25,7 @@ def pdf(order):
         c.drawRightString(550,y,get_display(arabic_reshaper.reshape(chunk)));y-=28
     snap=json.loads(order['snapshot']);customer=snap['customer']
     line('Sellora | '+('پیش‌فاکتور' if snap['expert_required'] else 'رسید سفارش'),True)
+    if snap.get('demo'):line('نسخه نمایشی؛ اطلاعات تجاری و خرید نمونه‌اند.')
     line('این رسید، تأیید پرداخت نیست.')
     line('شماره سفارش: '+order['id'])
     dt=datetime.fromisoformat(order['created']).astimezone(ZoneInfo('Asia/Tehran'))

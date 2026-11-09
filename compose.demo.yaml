@@ -1,0 +1,7 @@
+# اجرا: docker compose -f compose.yaml -f compose.demo.yaml up --build
+services:
+  sellora:
+    environment:
+      SELLORA_DEMO_MODE: "true"
+      SELLORA_SEED_CUSTOMERS: "true"
+      SELLORA_DB: /app/data/sellora-demo.db

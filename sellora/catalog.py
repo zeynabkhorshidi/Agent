@@ -86,11 +86,16 @@ async def preview(transport=None):
     return {'source':CATALOG,'products':products,'image_candidates':[dict(url=urljoin(url,i['url']),label=i['label']) for i in parser.images[:100]],'note':'فقط داده واقعی صفحه؛ قیمت و موجودی فروش جداگانه تأیید می‌شوند.'}
 
 class CatalogSync:
-    def __init__(self,transport=None):self.transport=transport;self.task=None;self.state={'state':'not_started','products':0,'images':0,'pages':0,'complete':False}
+    def __init__(self,transport=None,mode=None):self.transport=transport;self.mode=mode or os.getenv('CATALOG_MODE','api');self.task=None;self.state={'state':'not_started','products':0,'images':0,'pages':0,'complete':False}
     def start(self):
         if not self.task or self.task.done():self.task=asyncio.create_task(self.run())
         return self.state
     async def run(self):
+        if self.mode=='api':
+            from .material_catalog import sync_materials
+            return await sync_materials(self)
+        return await self.run_html()
+    async def run_html(self):
         self.state={'state':'running','products':0,'images':0,'pages':0,'complete':False}
         queue=deque([CATALOG]);seen=set();found={};limit=int(os.getenv('CATALOG_MAX_PAGES','200'));failures=0
         try:

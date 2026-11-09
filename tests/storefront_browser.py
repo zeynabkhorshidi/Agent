@@ -34,7 +34,7 @@ with sync_playwright() as p:
  dl.value.save_as(out/'storefront-receipt.pdf');assert (out/'storefront-receipt.pdf').read_bytes().startswith(b'%PDF')
  page.click('#successClose');page.screenshot(path=str(out/'storefront-order.png'),full_page=True)
  mobile=context.new_page();mobile.set_viewport_size({'width':390,'height':844});mobile.goto(BASE);mobile.wait_for_selector('.product');assert mobile.evaluate('document.documentElement.scrollWidth<=innerWidth');mobile.click('#cartToggle');mobile.wait_for_selector('.basket.open');mobile.click('#cartClose');mobile.screenshot(path=str(out/'storefront-mobile.png'),full_page=True)
- admin=browser.new_page(viewport={'width':1440,'height':1000});admin.goto(BASE+'/admin');admin.fill('#password','test-admin-only');admin.click('#login button.primary');admin.wait_for_selector('#dashboard:visible');admin.screenshot(path=str(out/'storefront-admin.png'),full_page=True)
+ admin=browser.new_page(viewport={'width':1440,'height':1000});admin.goto(BASE+'/admin');admin.fill('#password',os.getenv('TEST_ADMIN_PASSWORD','test-admin-only'));admin.click('#login button.primary');admin.wait_for_selector('#dashboard:visible');admin.screenshot(path=str(out/'storefront-admin.png'),full_page=True)
  # کل مسیر با دریافت صوت و ارسال خودکار؛ بدون دکمه ارسال متن
  voicepage=context.new_page();voicepage.goto(BASE);voicepage.wait_for_selector('.product');phone2='09'+str(uuid.uuid4().int)[:9]
  phrases=[phone2,'123456','مشتری مسیر صوتی','تهران','نشانی تست چهارده','بله','پرتقال دو کارتن','همین کافیه']

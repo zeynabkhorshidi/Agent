@@ -7,7 +7,8 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY sellora sellora
 COPY web web
 COPY migrations migrations
-RUN useradd -m -u 10001 sellora && mkdir data && chown sellora:sellora data && chmod -R a+rX sellora web migrations
+COPY examples examples
+RUN useradd -m -u 10001 sellora && mkdir data && chown sellora:sellora data && chmod -R a+rX sellora web migrations examples
 USER sellora
 ENV SELLORA_DB=/app/data/sellora.db
 EXPOSE 8000

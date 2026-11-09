@@ -48,6 +48,9 @@ https://catalog.sayesaman.com/img/Products/{material}.png
 
 ## صوت و مدل مکالمه
 
+اگر اتصال TCP برقرار است ولی درخواست HTTP یا HTTPS ریست می‌شود، [راهنمای بررسی اتصال صوت](docs/STT_CONNECTION_REPAIR.md) را بخوانید. علت هر مسیر و کد پیگیری خطا اکنون جدا ثبت می‌شوند. ابزار `check-voice-windows.cmd` گزارش کامل بدون صوت/رونوشت می‌دهد؛ با گزینه `--audio` در CLI می‌توان فقط فایل آزمایشی انتخابی را به هر دو مسیر فرستاد.
+
+
 در `.env`:
 
 ```dotenv
@@ -74,6 +77,6 @@ SQLite با WAL و migrationها داده‌ها را نگه می‌دارد: م
 python -m unittest discover -s tests -v
 ```
 
-گزارش جدید: [docs/SALES_AGENT_TEST_REPORT.md](docs/SALES_AGENT_TEST_REPORT.md). قرارداد و راهنمای نمایش: [docs/SALES_AGENT.md](docs/SALES_AGENT.md). گزارش‌های قبلی تاریخی‌اند. تست مرورگر نیازمند `requirements-dev.txt` و Chromium است و از سرویس صوت کنترل‌شده استفاده می‌کند؛ موفقیت آن به معنی اتصال مدل واقعی نیست.
+آخرین اصلاحات صوت و نگاشت پورت STT: [docs/STT_CONNECTION_REPAIR.md](docs/STT_CONNECTION_REPAIR.md). گزارش مسیر سفارش: [docs/SALES_AGENT_TEST_REPORT.md](docs/SALES_AGENT_TEST_REPORT.md). قرارداد و راهنمای نمایش: [docs/SALES_AGENT.md](docs/SALES_AGENT.md). گزارش‌های قبلی تاریخی‌اند. تست مرورگر نیازمند `requirements-dev.txt` و Chromium است و از سرویس صوت کنترل‌شده استفاده می‌کند؛ موفقیت آن به معنی اتصال مدل واقعی نیست.
 
 Docker و volume پایدار در `compose.yaml` موجودند. راهنمای استقرار در `docs/DEPLOYMENT.md`. فایل ZIP تحویل در `downloads/Sellora.zip` است؛ فایل محیط، دیتابیس شخصی و محیط مجازی در آن قرار نمی‌گیرند.

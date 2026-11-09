@@ -1,0 +1,20 @@
+# Copy beside the ORIGINAL STT Dockerfile, not the Sellora Dockerfile.
+# The supplied STT Dockerfile runs uvicorn on 8123; mapping 8000:8000 is invalid.
+services:
+  stt:
+    build: .
+    ports:
+      - "127.0.0.1:8123:8123"
+    environment:
+      STT_MODEL_PATH: /app/model/large-v3-turbo
+      STT_DEVICE: cpu
+      STT_COMPUTE_TYPE: int8
+    volumes:
+      - ./model:/app/model:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8123/health',timeout=4))['status']=='ok'"]
+      interval: 20s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped

@@ -19,6 +19,7 @@ COOKIE='sellora_session'
 ADMIN=os.getenv('SELLORA_ADMIN_PASSWORD','')
 ADMIN_SESSIONS={}
 D=json.dumps
+GREETING='سلام، روزتون بخیر. من دستیار فروش هوشمند سلورا هستم. برای ثبت سفارش کمکتون می‌کنم. لطفاً شماره موبایلتون رو بفرمایید.'
 
 def fail(message,code=400): raise HTTPException(code,message)
 def uid():return uuid.uuid4().hex
@@ -54,7 +55,7 @@ def view(c,sid):
     lines=[dict(by[k],quantity=n,total=by[k]['price']*n) for k,n in items.items() if k in by]
     history=[dict(x) for x in c.execute('SELECT role,text FROM conversations WHERE session_id=? ORDER BY id DESC LIMIT 60',(sid,)).fetchall()][::-1]
     hero=next((p.get('image_url') for p in ps if p.get('image_url') and any(b in normalize(' '.join([p.get('brand',''),p['name'],p.get('category',''),p.get('subcategory','')])).lower().replace(' ','') for b in ('سنایچ','sunich'))),None)
-    return dict(hero_image=hero,customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,choices=s.get('choices',[]),demo_catalog=os.getenv('SELLORA_DEMO_MODE','false').lower()=='true',demo=True)
+    return dict(greeting=GREETING,hero_image=hero,customer=customer,stage=s.get('stage','mobile'),paused=s.get('paused',False),cart=dict(revision=rev,items=lines,total=sum(x['total'] for x in lines)),products=ps,messages=history,choices=s.get('choices',[]),demo_catalog=os.getenv('SELLORA_DEMO_MODE','false').lower()=='true',demo=True)
 
 def next_question(customer,s):
     if not customer:return 'شماره موبایلتان را وارد کنید. احراز این نسخه آزمایشی است.'
@@ -112,7 +113,7 @@ async def security(request,call_next):
     res.headers['X-Content-Type-Options']='nosniff'
     res.headers['Referrer-Policy']='same-origin'
     res.headers['X-Frame-Options']='DENY'
-    res.headers['Content-Security-Policy']="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; script-src 'self'; frame-ancestors 'none'"
+    res.headers['Content-Security-Policy']="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; script-src 'self'; frame-ancestors 'none'"
     res.headers['Cache-Control']='no-store'
     return res
 
@@ -589,7 +590,7 @@ async def speak(body:Speak,request:Request):
             row,_=load(c,value)
             if row['customer_id']:
                 allowed=any(registered_speech(order['id'])==body.text for order in c.execute('SELECT id FROM orders WHERE customer_id=? ORDER BY created DESC LIMIT 10',(row['customer_id'],)))
-        if not allowed and body.text!='سلام، روزتون بخیر. من دستیار فروش سلورا هستم. برای ثبت سفارش کمکتون می‌کنم. لطفاً شماره موبایلتون رو بفرمایید.':fail('این متن پاسخ معتبر این نشست نیست.',403)
+        if not allowed and body.text not in (GREETING,'سلام، روزتون بخیر. من دستیار فروش سلورا هستم. برای ثبت سفارش کمکتون می‌کنم. لطفاً شماره موبایلتون رو بفرمایید.'):fail('این متن پاسخ معتبر این نشست نیست.',403)
     try:data=await request.app.state.speech_output.synthesize(body.text)
     except ConnectionError:fail('صدای سرویس در دسترس نیست؛ پاسخ متنی محفوظ است.',503)
     return Response(data,media_type='audio/mpeg')
@@ -640,7 +641,10 @@ def catalog_status(request:Request):
 @app.get('/api/admin/voice/diagnostics')
 async def voice_diagnostics(request:Request):
     admin(request)
-    return await request.app.state.stt.diagnostics()
+    report=await request.app.state.stt.diagnostics()
+    with db.connect() as c:
+        report['recent_failures']=[dict(created=r['created'],**json.loads(r['data'])) for r in c.execute("SELECT data,created FROM audit_events WHERE kind='voice.failed' ORDER BY id DESC LIMIT 10")]
+    return report
 
 @app.get('/api/admin/catalog/preview')
 async def catalog_preview(request:Request):

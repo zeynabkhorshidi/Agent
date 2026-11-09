@@ -4,7 +4,7 @@ import {AssistantSpeaker} from './speaker.js';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),num=n=>new Intl.NumberFormat('fa-IR').format(n);
 let state,quote,busy=false,started=false,requestKey=null,category='all',detailSKU=null,activeVoiceQuote=null,lastReply='',autoActive=false,catalogPage=1;
 const PAGE_SIZE=24;
-const greeting='سلام، روزتون بخیر. من دستیار فروش هوشمند سلورا هستم. برای ثبت سفارش کمکتون می‌کنم. لطفاً شماره موبایلتون رو بفرمایید.';
+let greeting='سلام، روزتون بخیر. من دستیار فروش هوشمند سلورا هستم. برای ثبت سفارش کمکتون می‌کنم. لطفاً شماره موبایلتون رو بفرمایید.';
 function searchKey(s){return String(s??'').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[آأ]/g,'ا').replace(/\u200c/g,' ').replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/اب\s*میوه(?:\s*های)?/g,'ابمیوه').replace(/سن\s*ایچ/g,'سنایچ').replace(/\s+/g,' ').trim().toLowerCase();}
 function imageURL(p){const u=p.image_url||'';return /^\/(?:media|static\/images)\/[\w./-]+$/.test(u)&&!u.includes('..')?u:null;}
 function photograph(p,small=false){const url=imageURL(p);return url?`<img src="${esc(url)}" alt="${esc(p.name)}" loading="lazy">`:'';}
@@ -92,4 +92,4 @@ $('#ordersTab').onclick=showOrders;$('#homeTab').onclick=$('#back').onclick=()=>
 document.addEventListener('visibilitychange',()=>{if(document.hidden){autoActive=false;if(['recording','requesting'].includes(voiceController.state))voiceController.cancel();speaker.cancel();}});window.addEventListener('pagehide',()=>{voiceController.cancel();speaker.cancel();});
 $('#heroImage').onerror=()=>{$('#heroImage').hidden=true;$('#heroFallback').hidden=false;};
 async function refreshCatalog(){try{const report=await api('/catalog/status');if(report.state==='running'){if(!state.products.length)$('#catalog').innerHTML='<div class="empty"><h3>در حال دریافت کاتالوگ</h3></div>';setTimeout(refreshCatalog,2000);}if(report.products){state=await api('/session');render();}}catch{}}
-api('/session').then(s=>{state=s;render();checkVoice();assistantStatus();refreshCatalog();if(s.messages.length)startText();if(location.pathname==='/catalog')$('#catalogSection').scrollIntoView();}).catch(e=>{toast(e.message);$('#voiceState').textContent='ارتباط با سرور برقرار نشد';});
+api('/session').then(s=>{state=s;greeting=s.greeting||greeting;render();checkVoice();assistantStatus();refreshCatalog();if(s.messages.length)startText();if(location.pathname==='/catalog')$('#catalogSection').scrollIntoView();}).catch(e=>{toast(e.message);$('#voiceState').textContent='ارتباط با سرور برقرار نشد';});

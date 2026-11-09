@@ -3,8 +3,10 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from fastapi import Request, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
 from . import db
 from .stt import STTError
 
@@ -21,7 +23,7 @@ def register_voice(app, sid, load):
         health = await service.health()
         return dict(**service.status(), health=health, mode=settings['mode'],
                     max_upload_bytes=service.config.max_bytes, recording_limit_seconds=50,request_timeout_seconds=service.config.online_timeout+service.config.offline_timeout+15,
-                    note='تبدیل پس از پایان ضبط انجام می‌شود؛ پاسخ دستیار فعلاً متنی است.')
+                    note='تبدیل گفتار پس از پایان ضبط انجام می‌شود.')
 
     @app.post('/api/voice/transcribe')
     async def transcribe(request: Request, file: UploadFile = File(...), turn_id: str = Form(...), quote_id: str = Form('')):
@@ -94,10 +96,11 @@ def register_voice(app, sid, load):
                 c.commit()
             return payload
         except STTError as exc:
+            incident_id=uuid.uuid4().hex[:16]
             with db.connect() as c:
                 c.execute("UPDATE voice_requests SET status='failed',result=NULL WHERE session_id=? AND turn_id=? AND status='processing'", (value, turn_id))
-                db.audit(c, value, 'voice.failed', {'turn_id': turn_id, 'code': exc.code})
-            raise HTTPException(exc.status, exc.message) from None
+                db.audit(c, value, 'voice.failed', {'turn_id': turn_id, 'code': exc.code,'incident_id':incident_id,'causes':exc.details})
+            return JSONResponse({'detail':exc.message,'code':exc.code,'incident_id':incident_id},status_code=exc.status)
         finally:
             audio.clear()
 

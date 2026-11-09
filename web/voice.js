@@ -65,7 +65,7 @@ export class VoiceController {
       const r=await fetch('/api/voice/transcribe',{method:'POST',body:form,signal:this.controller.signal});
       let b;try{b=await r.json();}catch{throw Error('تبدیل صدا انجام نشد. دوباره امتحان کنید.');}
       if(generation!==this.generation)return;
-      if(!r.ok)throw Error(typeof b.detail==='string'?b.detail:'تبدیل گفتار انجام نشد. فایل دیگری امتحان کنید یا متنی ادامه دهید.');
+      if(!r.ok){const message=typeof b.detail==='string'?b.detail:'تبدیل گفتار انجام نشد. فایل دیگری امتحان کنید یا متنی ادامه دهید.';throw Error(message+(b.incident_id?' کد پیگیری: '+b.incident_id:''));}
       if(b.turn_id!==turnId)return;
       this.controller=null;this.turnId=null;this.onDraft(b);if(generation===this.generation)this.setState('draft','متن آماده بررسی شماست');
     }catch(e){if(generation!==this.generation)return;if(e.name==='AbortError'&&!timedOut)return;if(timedOut){fetch('/api/voice/cancel/'+encodeURIComponent(turnId),{method:'POST'}).catch(()=>{});this.setState('idle','آماده');this.onError('دریافت متن طول کشید. دوباره امتحان کنید یا پیامتان را بنویسید.');return;}this.setState('idle','ورود متنی آماده');this.onError(e instanceof TypeError?'ارتباط با سرور قطع شد؛ سبد محفوظ است. دوباره تلاش کنید یا متنی ادامه دهید.':e.message);}

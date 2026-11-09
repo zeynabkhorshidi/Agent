@@ -1,0 +1,7 @@
+{
+  "controlled_audio_received": true,
+  "blob_playback_started": true,
+  "playback_completed": true,
+  "csp_violations": [],
+  "real_tts_provider_tested": false
+}
